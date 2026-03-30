@@ -1,5 +1,5 @@
 import React from "react";
-import { Settings, Info } from "lucide-react";
+import { Settings, Info, Triangle, Circle } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import {
@@ -31,6 +31,57 @@ export default function SettingsPanel({ settings, onSettingsChange, disabled }) 
       </div>
 
       <div className="panel-content">
+        {/* Renderer Type */}
+        <div className="settings-section">
+          <div className="flex items-center gap-2 mb-2">
+            <Label className="settings-label mb-0">Renderer</Label>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger>
+                  <Info className="w-3 h-3 text-[var(--outline)]" />
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs">
+                  <p><strong>Gaussian:</strong> INRIA 3DGS - smooth, view-dependent colors</p>
+                  <p className="mt-1"><strong>Triangle:</strong> 3DV 2026 - sharper edges, game engine compatible</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => updateSetting("renderer", "gaussian")}
+              disabled={disabled}
+              className={`flex items-center justify-center gap-2 p-3 rounded-lg border transition-all ${
+                settings.renderer === "gaussian"
+                  ? "border-[var(--crimson)] bg-[var(--crimson)]/10 text-[var(--crimson)]"
+                  : "border-[var(--surface-variant)] text-[var(--outline)] hover:border-[var(--copper-base)]"
+              }`}
+              data-testid="renderer-gaussian"
+            >
+              <Circle className="w-4 h-4" />
+              <span className="text-xs font-medium">Gaussian</span>
+            </button>
+            <button
+              onClick={() => updateSetting("renderer", "triangle")}
+              disabled={disabled}
+              className={`flex items-center justify-center gap-2 p-3 rounded-lg border transition-all ${
+                settings.renderer === "triangle"
+                  ? "border-[var(--copper-base)] bg-[var(--copper-base)]/10 text-[var(--copper-base)]"
+                  : "border-[var(--surface-variant)] text-[var(--outline)] hover:border-[var(--copper-base)]"
+              }`}
+              data-testid="renderer-triangle"
+            >
+              <Triangle className="w-4 h-4" />
+              <span className="text-xs font-medium">Triangle</span>
+            </button>
+          </div>
+          <p className="text-[0.6rem] text-[var(--outline)] mt-2">
+            {settings.renderer === "triangle" 
+              ? "Triangle Splatting (3DV 2026) - sharper, 2400+ FPS, mesh export"
+              : "3D Gaussian Splatting (SIGGRAPH 2023) - smooth, view-dependent"}
+          </p>
+        </div>
+
         {/* Quality Preset */}
         <div className="settings-section">
           <div className="flex items-center gap-2 mb-2">
@@ -114,40 +165,42 @@ export default function SettingsPanel({ settings, onSettingsChange, disabled }) 
           </div>
         </div>
 
-        {/* SH Degree */}
-        <div className="settings-section">
-          <div className="flex items-center gap-2 mb-2">
-            <Label className="settings-label mb-0">SH Degree</Label>
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger>
-                  <Info className="w-3 h-3 text-[var(--outline)]" />
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Spherical harmonics degree for view-dependent effects</p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          </div>
-          <Select
-            value={String(settings.sh_degree)}
-            onValueChange={(value) => updateSetting("sh_degree", parseInt(value))}
-            disabled={disabled}
-          >
-            <SelectTrigger
-              className="w-full bg-[var(--secondary)] border-[var(--surface-variant)]"
-              data-testid="sh-degree-select"
+        {/* SH Degree - Only for Gaussian */}
+        {settings.renderer === "gaussian" && (
+          <div className="settings-section">
+            <div className="flex items-center gap-2 mb-2">
+              <Label className="settings-label mb-0">SH Degree</Label>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger>
+                    <Info className="w-3 h-3 text-[var(--outline)]" />
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Spherical harmonics degree for view-dependent effects</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
+            <Select
+              value={String(settings.sh_degree)}
+              onValueChange={(value) => updateSetting("sh_degree", parseInt(value))}
+              disabled={disabled}
             >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="0">0 (Diffuse only)</SelectItem>
-              <SelectItem value="1">1 (Basic)</SelectItem>
-              <SelectItem value="2">2 (Standard)</SelectItem>
-              <SelectItem value="3">3 (High detail)</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+              <SelectTrigger
+                className="w-full bg-[var(--secondary)] border-[var(--surface-variant)]"
+                data-testid="sh-degree-select"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="0">0 (Diffuse only)</SelectItem>
+                <SelectItem value="1">1 (Basic)</SelectItem>
+                <SelectItem value="2">2 (Standard)</SelectItem>
+                <SelectItem value="3">3 (High detail)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        )}
       </div>
     </div>
   );

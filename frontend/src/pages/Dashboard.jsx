@@ -26,6 +26,7 @@ export default function Dashboard() {
     resolution: 1024,
     iterations: 30000,
     sh_degree: 3,
+    renderer: "gaussian",  // "gaussian" or "triangle"
   });
   const [youtubeJobs, setYoutubeJobs] = useState([]);
 

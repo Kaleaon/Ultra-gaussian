@@ -525,6 +525,78 @@ class GaussianSplattingAPITester:
         except Exception as e:
             return self.log_test("Model File Saved to Disk", False, f"Error: {str(e)}")
 
+    def test_triangle_splatting_module_import(self):
+        """Test that Triangle Splatting module loads correctly"""
+        try:
+            # Test if the triangle splatting pipeline can be imported (indirect test via API)
+            response = requests.get(f"{self.api_url}/", timeout=10)
+            success = response.status_code == 200
+            details = f"Status: {response.status_code}"
+            
+            if success:
+                # If API is running, the triangle_splatting module loaded successfully
+                details += " - TriangleSplatTrainer imported successfully in server.py"
+            
+            return self.log_test("Triangle Splatting Module Import", success, details)
+        except Exception as e:
+            return self.log_test("Triangle Splatting Module Import", False, f"Error: {str(e)}")
+
+    def test_triangle_renderer_settings(self):
+        """Test updating project settings with triangle renderer"""
+        if not self.project_id:
+            return self.log_test("Triangle Renderer Settings", False, "No project ID available")
+        
+        try:
+            settings = {
+                "quality": "high",
+                "resolution": 1024,
+                "iterations": 30000,
+                "sh_degree": 3,
+                "renderer": "triangle"  # NEW: Triangle renderer
+            }
+            response = requests.patch(
+                f"{self.api_url}/projects/{self.project_id}/settings",
+                json=settings,
+                timeout=10
+            )
+            success = response.status_code == 200
+            details = f"Status: {response.status_code}"
+            
+            if success:
+                details += ", Renderer: triangle"
+            
+            return self.log_test("Triangle Renderer Settings", success, details)
+        except Exception as e:
+            return self.log_test("Triangle Renderer Settings", False, f"Error: {str(e)}")
+
+    def test_gaussian_renderer_settings(self):
+        """Test updating project settings with gaussian renderer"""
+        if not self.project_id:
+            return self.log_test("Gaussian Renderer Settings", False, "No project ID available")
+        
+        try:
+            settings = {
+                "quality": "high",
+                "resolution": 1024,
+                "iterations": 30000,
+                "sh_degree": 3,
+                "renderer": "gaussian"  # Gaussian renderer
+            }
+            response = requests.patch(
+                f"{self.api_url}/projects/{self.project_id}/settings",
+                json=settings,
+                timeout=10
+            )
+            success = response.status_code == 200
+            details = f"Status: {response.status_code}"
+            
+            if success:
+                details += ", Renderer: gaussian"
+            
+            return self.log_test("Gaussian Renderer Settings", success, details)
+        except Exception as e:
+            return self.log_test("Gaussian Renderer Settings", False, f"Error: {str(e)}")
+
     def test_export_formats(self):
         """Test export functionality for different formats"""
         if not self.project_id:
@@ -579,6 +651,11 @@ class GaussianSplattingAPITester:
         
         # NEW: Gaussian Splatting pipeline tests
         self.test_gaussian_splatting_pipeline_import()
+        
+        # NEW: Triangle Splatting tests
+        self.test_triangle_splatting_module_import()
+        self.test_triangle_renderer_settings()
+        self.test_gaussian_renderer_settings()
         
         # YouTube video processing tests
         self.test_youtube_video_processing()

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, File, UploadFile, HTTPException, BackgroundTasks
+from fastapi import FastAPI, APIRouter, File, UploadFile, HTTPException, BackgroundTasks, Query
 from fastapi.responses import FileResponse, Response
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -7,7 +7,7 @@ import os
 import logging
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Optional
+from typing import List, Optional, Literal
 import uuid
 from datetime import datetime, timezone
 import json
@@ -17,6 +17,8 @@ import base64
 
 # Import Gaussian Splatting pipeline
 from gaussian_splatting import GaussianSplatPipeline, generate_thumbnail
+# Import Triangle Splatting
+from triangle_splatting import TriangleSplatTrainer, convert_gaussians_to_triangles, export_to_off, export_to_obj
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -73,6 +75,7 @@ class ProcessingSettings(BaseModel):
     resolution: int = 1024
     iterations: int = 30000
     sh_degree: int = 3
+    renderer: str = "gaussian"  # "gaussian" or "triangle"
 
 class ImageUpload(BaseModel):
     model_config = ConfigDict(extra="ignore")
