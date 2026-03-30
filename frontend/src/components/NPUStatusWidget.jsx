@@ -1,14 +1,34 @@
-import React from "react";
-import { Cpu, Activity, Zap, AlertTriangle } from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { Cpu, Activity, Zap, AlertTriangle, Smartphone } from "lucide-react";
+import { detectDeviceCapabilities } from "@/utils/webnnClassifier";
 
 export default function NPUStatusWidget({ capabilities, isProcessing }) {
-  const hasNPU = capabilities?.npuAvailable;
-  const hasGPU = capabilities?.webgpu;
-  const hasWebNN = capabilities?.webnn;
-  const backend = capabilities?.backend || "cpu";
+  const [deviceInfo, setDeviceInfo] = useState(null);
+  const [isDetecting, setIsDetecting] = useState(true);
+
+  useEffect(() => {
+    async function detect() {
+      try {
+        const info = await detectDeviceCapabilities();
+        setDeviceInfo(info);
+      } catch (e) {
+        console.error('Device detection failed:', e);
+      } finally {
+        setIsDetecting(false);
+      }
+    }
+    detect();
+  }, []);
+
+  // Merge browser capabilities with device info
+  const hasNPU = deviceInfo?.npuAvailable || capabilities?.npuAvailable;
+  const hasGPU = deviceInfo?.gpuAvailable || deviceInfo?.webgpu || capabilities?.webgpu;
+  const hasWebNN = deviceInfo?.webnn || capabilities?.webnn;
+  const isPixel = deviceInfo?.isPixel;
+  const tensorVersion = deviceInfo?.tensorVersion;
 
   const getBackendDisplay = () => {
-    if (hasNPU) return { label: "NPU", color: "text-green-400", icon: Zap };
+    if (hasNPU) return { label: isPixel ? "TPU" : "NPU", color: "text-green-400", icon: Zap };
     if (hasGPU) return { label: "GPU", color: "text-[var(--copper-base)]", icon: Activity };
     return { label: "CPU", color: "text-[var(--outline)]", icon: Cpu };
   };
@@ -28,16 +48,26 @@ export default function NPUStatusWidget({ capabilities, isProcessing }) {
         </div>
         <div
           className={`status-indicator ${
-            isProcessing ? "processing" : hasNPU || hasGPU ? "active" : "idle"
+            isDetecting ? "processing" : isProcessing ? "processing" : hasNPU || hasGPU ? "active" : "idle"
           }`}
         />
       </div>
+
+      {/* Pixel Device Badge */}
+      {isPixel && (
+        <div className="flex items-center gap-2 mb-3 p-2 bg-[var(--surface-variant)] rounded-lg">
+          <Smartphone className="w-4 h-4 text-blue-400" />
+          <span className="text-xs text-[var(--on-surface)]">
+            Google Pixel {tensorVersion && `(Tensor ${tensorVersion})`}
+          </span>
+        </div>
+      )}
 
       <div className="npu-metrics">
         <div className="npu-metric">
           <div className={`npu-metric-value ${backendDisplay.color}`}>
             <BackendIcon className="w-5 h-5 inline mr-1" />
-            {backendDisplay.label}
+            {isDetecting ? "..." : backendDisplay.label}
           </div>
           <div className="npu-metric-label">Active Backend</div>
         </div>
@@ -48,14 +78,14 @@ export default function NPUStatusWidget({ capabilities, isProcessing }) {
               hasWebNN ? "text-green-400" : "text-[var(--outline)]"
             }`}
           >
-            {hasWebNN ? "YES" : "NO"}
+            {isDetecting ? "..." : hasWebNN ? "YES" : "NO"}
           </div>
           <div className="npu-metric-label">WebNN API</div>
         </div>
       </div>
 
       {/* Capability Badges */}
-      <div className="flex gap-2 mt-4">
+      <div className="flex flex-wrap gap-2 mt-4">
         <div
           className={`text-[0.625rem] px-2 py-1 rounded-full ${
             hasGPU
@@ -63,7 +93,7 @@ export default function NPUStatusWidget({ capabilities, isProcessing }) {
               : "bg-[var(--surface-variant)] text-[var(--outline)]"
           }`}
         >
-          WebGPU
+          {deviceInfo?.webgpu ? "WebGPU" : "GPU"}
         </div>
         <div
           className={`text-[0.625rem] px-2 py-1 rounded-full ${
@@ -81,12 +111,22 @@ export default function NPUStatusWidget({ capabilities, isProcessing }) {
               : "bg-[var(--surface-variant)] text-[var(--outline)]"
           }`}
         >
-          NPU
+          {isPixel ? "Tensor TPU" : "NPU"}
         </div>
       </div>
 
+      {/* Instructions for enabling WebNN on Pixel */}
+      {isPixel && !hasWebNN && (
+        <div className="flex items-start gap-2 mt-4 p-2 bg-blue-500/10 rounded text-[0.65rem] text-blue-400">
+          <Smartphone className="w-3 h-3 mt-0.5 flex-shrink-0" />
+          <span>
+            Enable TPU: Open <code className="bg-[var(--surface-variant)] px-1 rounded">chrome://flags</code> → Search "WebNN" → Enable → Restart Chrome
+          </span>
+        </div>
+      )}
+
       {/* Warning if no acceleration */}
-      {!hasGPU && !hasNPU && (
+      {!isDetecting && !hasGPU && !hasNPU && (
         <div className="flex items-start gap-2 mt-4 p-2 bg-[var(--surface-variant)] rounded text-[0.65rem] text-[var(--outline)]">
           <AlertTriangle className="w-3 h-3 text-yellow-500 mt-0.5 flex-shrink-0" />
           <span>

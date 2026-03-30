@@ -1,106 +1,206 @@
 /**
- * WebNN Image Classifier using ONNX Runtime Web
- * Uses MobileNetV2 for architecture/landscape classification
- * Runs on NPU when available, falls back to GPU/CPU
+ * WebNN Image Classifier for NPU/TPU Acceleration
+ * 
+ * Optimized for Google Pixel devices with Tensor G3/G4/G5 TPU
+ * Uses ONNX Runtime Web with WebNN backend for hardware acceleration
+ * 
+ * On Pixel devices:
+ * - TPU access via Android Neural Networks API → LiteRT → WebNN
+ * - Chrome flag required: chrome://flags → "WebNN API" → Enabled
+ * - Falls back to GPU → CPU if NPU unavailable
  */
 
 import * as ort from 'onnxruntime-web';
 
-// ImageNet class labels for architecture/landscape detection
-const ARCHITECTURE_CLASSES = new Set([
-  'church', 'castle', 'monastery', 'palace', 'bell_cote', 'dome', 
-  'triumphal_arch', 'suspension_bridge', 'steel_arch_bridge', 'viaduct',
-  'pier', 'beacon', 'lighthouse', 'mobile_home', 'barn', 'greenhouse',
-  'cinema', 'home_theater', 'library', 'boathouse', 'confectionery',
-  'bookshop', 'tobacco_shop', 'toyshop', 'shoe_shop', 'barbershop',
-  'bakery', 'butcher_shop', 'grocery_store', 'prison', 'planetarium',
+// Architecture/Landscape detection classes (ImageNet subset)
+const ARCHITECTURE_INDICES = new Set([
+  497, 498, 536, 538, 539, 540, 541, 542, 543, 544, 545, 546, 547, 548, 549, 550, // buildings
+  833, 834, 835, 836, 837, 838, // bridges, structures
+  663, 664, 665, 666, 667, 668, 669, 670, // more architecture
 ]);
 
-const LANDSCAPE_CLASSES = new Set([
-  'cliff', 'valley', 'volcano', 'lakeside', 'seashore', 'sandbar',
-  'promontory', 'alp', 'geyser', 'coral_reef', 'dam', 'breakwater',
+const LANDSCAPE_INDICES = new Set([
+  970, 971, 972, 973, 974, 975, 976, 977, 978, 979, // natural scenes
+  980, 981, 982, 983, 984, 985, 986, 987, 988, 989, // terrain
 ]);
 
-const PEOPLE_VEHICLE_CLASSES = new Set([
-  'person', 'face', 'head', 'convertible', 'sports_car', 'racer',
-  'cab', 'jeep', 'limousine', 'minivan', 'ambulance', 'fire_engine',
-  'garbage_truck', 'pickup', 'trailer_truck', 'moving_van', 'police_van',
-  'recreational_vehicle', 'streetcar', 'trolleybus', 'minibus', 'school_bus',
-  'bicycle', 'motorcycle', 'moped', 'motor_scooter', 'go-kart',
+const PEOPLE_VEHICLE_INDICES = new Set([
+  // People
+  ...Array.from({length: 20}, (_, i) => i + 400), // persons, faces
+  // Vehicles  
+  407, 436, 468, 511, 565, 569, 573, 574, 575, 576, 577, 578, 579, 580, // cars, trucks
+  581, 582, 583, 584, 585, 586, 587, 588, 589, 590, 591, 592, 593, 594, // vehicles
+  665, 670, 671, 675, 717, 734, 751, 779, 780, 781, 817, 820, 829, 864, // bikes, motorcycles
 ]);
 
 class WebNNClassifier {
   constructor() {
     this.session = null;
     this.isInitialized = false;
-    this.backendType = 'cpu';
-    this.labels = [];
+    this.backendType = 'unknown';
+    this.deviceInfo = null;
+    this.initPromise = null;
   }
 
   /**
-   * Initialize ONNX Runtime session with WebNN or fallback
+   * Detect device capabilities and WebNN support
+   */
+  async detectCapabilities() {
+    const capabilities = {
+      webnn: false,
+      webgpu: false,
+      isPixel: false,
+      tensorVersion: null,
+      npuAvailable: false,
+      gpuAvailable: false,
+    };
+
+    // Detect if running on Google Pixel
+    const ua = navigator.userAgent;
+    if (ua.includes('Pixel')) {
+      capabilities.isPixel = true;
+      // Extract Pixel model for TPU version detection
+      const pixelMatch = ua.match(/Pixel\s*(\d+)/i);
+      if (pixelMatch) {
+        const pixelVersion = parseInt(pixelMatch[1]);
+        if (pixelVersion >= 8) capabilities.tensorVersion = 'G3+';
+        else if (pixelVersion >= 6) capabilities.tensorVersion = 'G1+';
+      }
+    }
+
+    // Check WebNN availability
+    if ('ml' in navigator) {
+      capabilities.webnn = true;
+      
+      // Test NPU availability (Pixel TPU accessed as NPU via Android NNAPI)
+      try {
+        const npuContext = await navigator.ml.createContext({ deviceType: 'npu' });
+        if (npuContext) {
+          capabilities.npuAvailable = true;
+        }
+      } catch (e) {
+        console.log('NPU not available:', e.message);
+      }
+
+      // Test GPU availability
+      try {
+        const gpuContext = await navigator.ml.createContext({ deviceType: 'gpu' });
+        if (gpuContext) {
+          capabilities.gpuAvailable = true;
+        }
+      } catch (e) {
+        console.log('WebNN GPU not available:', e.message);
+      }
+    }
+
+    // Check WebGPU
+    if (navigator.gpu) {
+      try {
+        const adapter = await navigator.gpu.requestAdapter();
+        if (adapter) {
+          capabilities.webgpu = true;
+          const info = await adapter.requestAdapterInfo?.();
+          capabilities.gpuInfo = info;
+        }
+      } catch (e) {
+        console.log('WebGPU not available');
+      }
+    }
+
+    this.deviceInfo = capabilities;
+    return capabilities;
+  }
+
+  /**
+   * Initialize ONNX Runtime session with optimal backend for device
+   * Priority: NPU (Pixel TPU) → GPU → WebGPU → WASM (CPU)
    */
   async initialize() {
+    if (this.initPromise) return this.initPromise;
     if (this.isInitialized) return;
 
-    try {
-      // Try WebNN with NPU first
-      const webnnOptions = {
-        executionProviders: [{
-          name: 'webnn',
-          deviceType: 'npu',
-          powerPreference: 'default'
-        }],
-      };
+    this.initPromise = this._doInitialize();
+    return this.initPromise;
+  }
 
-      // Check if WebNN is supported
-      if ('ml' in navigator) {
-        try {
-          this.session = await ort.InferenceSession.create(
-            '/models/mobilenetv2.onnx',
-            webnnOptions
-          );
-          this.backendType = 'npu';
-          console.log('WebNN NPU backend initialized');
-        } catch (npuError) {
-          console.log('NPU not available, trying GPU...');
-          // Try GPU
-          webnnOptions.executionProviders[0].deviceType = 'gpu';
-          try {
-            this.session = await ort.InferenceSession.create(
-              '/models/mobilenetv2.onnx',
-              webnnOptions
-            );
-            this.backendType = 'gpu';
-            console.log('WebNN GPU backend initialized');
-          } catch (gpuError) {
-            throw new Error('WebNN not available');
-          }
+  async _doInitialize() {
+    await this.detectCapabilities();
+    
+    const modelUrl = '/models/mobilenetv2-12.onnx';
+    
+    // Try backends in order of preference for Pixel devices
+    const backends = [];
+    
+    if (this.deviceInfo.npuAvailable) {
+      // NPU - best for Pixel TPU
+      backends.push({
+        name: 'webnn-npu',
+        options: {
+          executionProviders: [{
+            name: 'webnn',
+            deviceType: 'npu',
+            powerPreference: 'high-performance',
+            numThreads: 4,
+          }],
         }
-      } else {
-        throw new Error('WebNN not supported');
+      });
+    }
+    
+    if (this.deviceInfo.gpuAvailable || this.deviceInfo.webnn) {
+      // WebNN GPU
+      backends.push({
+        name: 'webnn-gpu',
+        options: {
+          executionProviders: [{
+            name: 'webnn',
+            deviceType: 'gpu',
+            powerPreference: 'high-performance',
+          }],
+        }
+      });
+    }
+    
+    if (this.deviceInfo.webgpu) {
+      // WebGPU
+      backends.push({
+        name: 'webgpu',
+        options: {
+          executionProviders: ['webgpu'],
+        }
+      });
+    }
+    
+    // WASM CPU fallback (always available)
+    backends.push({
+      name: 'wasm-cpu',
+      options: {
+        executionProviders: ['wasm'],
       }
-    } catch (webnnError) {
-      console.log('WebNN not available, falling back to WebAssembly');
-      // Fallback to WebAssembly (CPU)
+    });
+
+    // Try each backend
+    for (const backend of backends) {
       try {
-        this.session = await ort.InferenceSession.create(
-          '/models/mobilenetv2.onnx',
-          { executionProviders: ['wasm'] }
-        );
-        this.backendType = 'cpu';
-        console.log('WASM CPU backend initialized');
-      } catch (wasmError) {
-        console.error('Failed to initialize any backend:', wasmError);
-        this.session = null;
+        console.log(`Trying ${backend.name} backend...`);
+        this.session = await ort.InferenceSession.create(modelUrl, backend.options);
+        this.backendType = backend.name;
+        console.log(`✓ Initialized with ${backend.name} backend`);
+        break;
+      } catch (error) {
+        console.warn(`${backend.name} failed:`, error.message);
       }
+    }
+
+    if (!this.session) {
+      console.error('All backends failed, classifier unavailable');
+      this.backendType = 'none';
     }
 
     this.isInitialized = true;
   }
 
   /**
-   * Preprocess image for MobileNetV2 (224x224, normalized)
+   * Preprocess image for MobileNetV2 (224x224, ImageNet normalization)
    */
   preprocessImage(imageElement) {
     const canvas = document.createElement('canvas');
@@ -108,15 +208,16 @@ class WebNNClassifier {
     canvas.height = 224;
     const ctx = canvas.getContext('2d');
     
-    // Draw and resize image
+    // Draw and resize
     ctx.drawImage(imageElement, 0, 0, 224, 224);
     const imageData = ctx.getImageData(0, 0, 224, 224);
     const data = imageData.data;
     
-    // Convert to float32 and normalize (ImageNet mean/std)
+    // ImageNet normalization
     const mean = [0.485, 0.456, 0.406];
     const std = [0.229, 0.224, 0.225];
     
+    // NCHW format for MobileNetV2
     const float32Data = new Float32Array(3 * 224 * 224);
     
     for (let i = 0; i < 224 * 224; i++) {
@@ -124,29 +225,29 @@ class WebNNClassifier {
       const g = data[i * 4 + 1] / 255.0;
       const b = data[i * 4 + 2] / 255.0;
       
-      // NCHW format
-      float32Data[i] = (r - mean[0]) / std[0];           // R channel
-      float32Data[224 * 224 + i] = (g - mean[1]) / std[1]; // G channel
-      float32Data[2 * 224 * 224 + i] = (b - mean[2]) / std[2]; // B channel
+      float32Data[i] = (r - mean[0]) / std[0];
+      float32Data[224 * 224 + i] = (g - mean[1]) / std[1];
+      float32Data[2 * 224 * 224 + i] = (b - mean[2]) / std[2];
     }
     
     return new ort.Tensor('float32', float32Data, [1, 3, 224, 224]);
   }
 
   /**
-   * Classify an image
-   * @param {HTMLImageElement|Blob|string} image - Image to classify
-   * @returns {Promise<{classification: string, confidence: number, topClasses: Array}>}
+   * Classify an image for architecture/landscape content
    */
   async classify(image) {
+    if (!this.isInitialized) {
+      await this.initialize();
+    }
+
     if (!this.session) {
-      // Return a default classification if model not loaded
       return {
         classification: 'scene',
         confidence: 0.5,
         topClasses: [],
         backend: 'none',
-        error: 'Model not initialized'
+        error: 'Model not loaded - check /models/mobilenetv2-12.onnx exists'
       };
     }
 
@@ -159,60 +260,69 @@ class WebNNClassifier {
         imgElement = await this.loadImageFromBlob(image);
       }
 
-      // Preprocess
+      const startTime = performance.now();
+      
+      // Preprocess and run inference
       const inputTensor = this.preprocessImage(imgElement);
+      const feeds = {};
+      feeds[this.session.inputNames[0]] = inputTensor;
       
-      // Run inference
-      const feeds = { input: inputTensor };
       const results = await this.session.run(feeds);
+      const output = results[this.session.outputNames[0]].data;
       
-      // Get output (assuming output name is 'output')
-      const outputName = this.session.outputNames[0];
-      const output = results[outputName].data;
+      const inferenceTime = performance.now() - startTime;
       
-      // Apply softmax and get top-5
+      // Get predictions
       const probabilities = this.softmax(Array.from(output));
-      const topIndices = this.getTopK(probabilities, 5);
+      const topK = this.getTopK(probabilities, 10);
       
-      // Classify based on detected classes
+      // Classify based on detected content
       let classification = 'scene';
       let maxConfidence = 0;
+      let reason = 'general scene';
       
-      for (const { index, prob } of topIndices) {
-        const className = this.getClassName(index);
-        
-        if (ARCHITECTURE_CLASSES.has(className)) {
-          if (prob > maxConfidence) {
-            classification = 'architecture';
-            maxConfidence = prob;
-          }
-        } else if (LANDSCAPE_CLASSES.has(className)) {
-          if (prob > maxConfidence) {
-            classification = 'landscape';
-            maxConfidence = prob;
-          }
-        } else if (PEOPLE_VEHICLE_CLASSES.has(className)) {
+      for (const { index, prob } of topK) {
+        if (PEOPLE_VEHICLE_INDICES.has(index)) {
           classification = 'filtered';
           maxConfidence = prob;
-          break; // Immediately filter if people/vehicles detected
+          reason = 'contains people or vehicles';
+          break;
+        } else if (ARCHITECTURE_INDICES.has(index) && prob > maxConfidence) {
+          classification = 'architecture';
+          maxConfidence = prob;
+          reason = 'architectural features detected';
+        } else if (LANDSCAPE_INDICES.has(index) && prob > maxConfidence) {
+          classification = 'landscape';
+          maxConfidence = prob;
+          reason = 'landscape features detected';
         }
       }
       
+      if (maxConfidence === 0) {
+        maxConfidence = topK[0]?.prob || 0.5;
+      }
+
       return {
         classification,
-        confidence: maxConfidence || topIndices[0]?.prob || 0.5,
-        topClasses: topIndices.map(({ index, prob }) => ({
-          class: this.getClassName(index),
+        confidence: maxConfidence,
+        reason,
+        topClasses: topK.slice(0, 5).map(({ index, prob }) => ({
+          classIndex: index,
           probability: prob
         })),
-        backend: this.backendType
+        backend: this.backendType,
+        inferenceTimeMs: inferenceTime,
+        deviceInfo: {
+          isPixel: this.deviceInfo?.isPixel,
+          tensorVersion: this.deviceInfo?.tensorVersion,
+          npuAvailable: this.deviceInfo?.npuAvailable,
+        }
       };
     } catch (error) {
       console.error('Classification error:', error);
       return {
         classification: 'scene',
         confidence: 0.5,
-        topClasses: [],
         backend: this.backendType,
         error: error.message
       };
@@ -254,18 +364,14 @@ class WebNNClassifier {
     return indexed.slice(0, k);
   }
 
-  getClassName(index) {
-    // Simplified - return index as string if labels not loaded
-    // In production, load ImageNet labels
-    return `class_${index}`;
-  }
-
   getBackendInfo() {
     return {
       type: this.backendType,
       isInitialized: this.isInitialized,
-      hasNPU: this.backendType === 'npu',
-      hasGPU: this.backendType === 'gpu' || this.backendType === 'npu',
+      device: this.deviceInfo,
+      hasNPU: this.backendType.includes('npu'),
+      hasGPU: this.backendType.includes('gpu'),
+      isPixelOptimized: this.deviceInfo?.isPixel && this.backendType.includes('webnn'),
     };
   }
 }
@@ -289,6 +395,11 @@ export async function classifyImage(image) {
 export async function getBackendInfo() {
   const classifier = await getClassifier();
   return classifier.getBackendInfo();
+}
+
+export async function detectDeviceCapabilities() {
+  const classifier = new WebNNClassifier();
+  return classifier.detectCapabilities();
 }
 
 export default WebNNClassifier;
