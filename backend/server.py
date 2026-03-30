@@ -845,8 +845,8 @@ async def get_model(project_id: str):
 
 @api_router.get("/projects/{project_id}/export/{format}")
 async def export_model(project_id: str, format: str):
-    if format not in ["ply", "gltf", "obj"]:
-        raise HTTPException(status_code=400, detail="Unsupported format. Use: ply, gltf, obj")
+    if format not in ["ply", "gltf", "obj", "off"]:
+        raise HTTPException(status_code=400, detail="Unsupported format. Use: ply, gltf, obj, off")
     
     project = await db.projects.find_one({"id": project_id}, {"_id": 0})
     if not project:
@@ -857,7 +857,13 @@ async def export_model(project_id: str, format: str):
     
     export_path = MODELS_DIR / f"{project_id}_model.{format}"
     
-    if format == "ply":
+    # Try to load real model data for proper export
+    model_path = MODELS_DIR / project_id / "model.json"
+    
+    if format == "off":
+        # OFF format for Triangle Splatting - game engine compatible
+        content = generate_off_mesh(model_path if model_path.exists() else None)
+    elif format == "ply":
         content = generate_demo_ply()
     elif format == "obj":
         content = generate_demo_obj()
@@ -872,6 +878,34 @@ async def export_model(project_id: str, format: str):
         filename=f"{project.get('name', 'model')}.{format}",
         media_type="application/octet-stream"
     )
+
+# Mesh/Triangle export endpoint
+@api_router.get("/projects/{project_id}/mesh")
+async def get_mesh(project_id: str):
+    """Get mesh data for Triangle Splatting preview"""
+    project = await db.projects.find_one({"id": project_id}, {"_id": 0})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    # Try to load triangle mesh
+    mesh_path = MODELS_DIR / project_id / "triangles.json"
+    if mesh_path.exists():
+        with open(mesh_path) as f:
+            mesh_data = json.load(f)
+            return {"format": "triangle", "triangles": mesh_data.get("triangles", []), "project_id": project_id}
+    
+    # Generate demo triangles from Gaussian splats
+    model_path = MODELS_DIR / project_id / "model.json"
+    if model_path.exists():
+        with open(model_path) as f:
+            model_data = json.load(f)
+            splats = model_data.get("splats", [])
+            triangles = convert_splats_to_triangles(splats)
+            return {"format": "triangle", "triangles": triangles, "project_id": project_id}
+    
+    # Fallback to demo mesh
+    demo_triangles = generate_demo_triangles()
+    return {"format": "triangle", "triangles": demo_triangles, "project_id": project_id}
 
 @api_router.get("/device-capabilities")
 async def get_device_capabilities():

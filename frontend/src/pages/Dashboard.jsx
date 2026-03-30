@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { Box, Cpu, Settings, Activity, Youtube, CheckCircle2, Loader2, XCircle } from "lucide-react";
+import { Box, Cpu, Settings, Activity, Youtube, CheckCircle2, Loader2, XCircle, Triangle } from "lucide-react";
 import Header from "@/components/Header";
 import ImageUploader from "@/components/ImageUploader";
 import ProcessingPanel from "@/components/ProcessingPanel";
 import GaussianViewer from "@/components/GaussianViewer";
+import MeshViewer from "@/components/MeshViewer";
 import ExportPanel from "@/components/ExportPanel";
 import SettingsPanel from "@/components/SettingsPanel";
 import NPUStatusWidget from "@/components/NPUStatusWidget";
@@ -19,6 +20,7 @@ export default function Dashboard() {
   const [images, setImages] = useState([]);
   const [processingStatus, setProcessingStatus] = useState(null);
   const [modelData, setModelData] = useState(null);
+  const [meshData, setMeshData] = useState(null);
   const [deviceCapabilities, setDeviceCapabilities] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [settings, setSettings] = useState({
@@ -407,11 +409,33 @@ export default function Dashboard() {
 
         {/* Center - 3D Viewer */}
         <div className="viewer-section">
-          <GaussianViewer
-            modelData={modelData}
-            isProcessing={isProcessing}
-            processingStatus={processingStatus}
-          />
+          {settings.renderer === "triangle" ? (
+            <MeshViewer
+              meshData={meshData}
+              isProcessing={isProcessing}
+            />
+          ) : (
+            <GaussianViewer
+              modelData={modelData}
+              isProcessing={isProcessing}
+              processingStatus={processingStatus}
+            />
+          )}
+          
+          {/* Renderer indicator */}
+          <div className="absolute top-4 right-4 flex items-center gap-2 bg-[var(--surface)]/80 backdrop-blur-sm px-3 py-1.5 rounded-lg">
+            {settings.renderer === "triangle" ? (
+              <>
+                <Triangle className="w-3 h-3 text-[var(--copper-base)]" />
+                <span className="text-xs text-[var(--outline)]">Triangle Splatting</span>
+              </>
+            ) : (
+              <>
+                <Box className="w-3 h-3 text-[var(--crimson)]" />
+                <span className="text-xs text-[var(--outline)]">Gaussian Splatting</span>
+              </>
+            )}
+          </div>
         </div>
 
         {/* Right Panel - Settings & Export */}
@@ -425,6 +449,7 @@ export default function Dashboard() {
           <ExportPanel
             onExport={handleExport}
             disabled={!isCompleted}
+            renderer={settings.renderer}
           />
         </div>
       </main>

@@ -14,23 +14,67 @@ import * as ort from 'onnxruntime-web';
 
 // Architecture/Landscape detection classes (ImageNet subset)
 const ARCHITECTURE_INDICES = new Set([
-  497, 498, 536, 538, 539, 540, 541, 542, 543, 544, 545, 546, 547, 548, 549, 550, // buildings
-  833, 834, 835, 836, 837, 838, // bridges, structures
-  663, 664, 665, 666, 667, 668, 669, 670, // more architecture
+  497, // church
+  498, // cinema  
+  483, // castle
+  536, // dock
+  538, // dome
+  627, // library
+  663, // monastery
+  668, // mosque
+  698, // palace
+  727, // pier
+  762, // prison
+  832, // stone_wall
+  833, // stupa
+  838, // suspension_bridge
+  855, // thatch
+  862, // tile_roof
+  878, // triumphal_arch
+  900, // water_tower
+  909, // wishing_well
 ]);
 
 const LANDSCAPE_INDICES = new Set([
-  970, 971, 972, 973, 974, 975, 976, 977, 978, 979, // natural scenes
-  980, 981, 982, 983, 984, 985, 986, 987, 988, 989, // terrain
+  970, // alp
+  971, // cliff
+  972, // coral_reef
+  973, // geyser
+  974, // lakeside
+  975, // promontory
+  976, // sandbar
+  977, // seashore
+  978, // valley
+  979, // volcano
+  334, // dam
+  417, // breakwater
 ]);
 
 const PEOPLE_VEHICLE_INDICES = new Set([
-  // People
-  ...Array.from({length: 20}, (_, i) => i + 400), // persons, faces
-  // Vehicles  
-  407, 436, 468, 511, 565, 569, 573, 574, 575, 576, 577, 578, 579, 580, // cars, trucks
-  581, 582, 583, 584, 585, 586, 587, 588, 589, 590, 591, 592, 593, 594, // vehicles
-  665, 670, 671, 675, 717, 734, 751, 779, 780, 781, 817, 820, 829, 864, // bikes, motorcycles
+  // Vehicles
+  407, // ambulance
+  436, // beach_wagon
+  468, // cab
+  511, // convertible
+  555, // fire_engine
+  569, // garbage_truck
+  573, // go-kart
+  609, // jeep
+  627, // limousine
+  654, // minibus
+  656, // minivan
+  665, // moped
+  670, // mountain_bike
+  675, // motor_scooter
+  717, // pickup
+  734, // police_van
+  751, // racer
+  779, // school_bus
+  817, // sports_car
+  820, // streetcar
+  864, // tow_truck
+  867, // trailer_truck
+  874, // trolleybus
 ]);
 
 class WebNNClassifier {
@@ -40,6 +84,21 @@ class WebNNClassifier {
     this.backendType = 'unknown';
     this.deviceInfo = null;
     this.initPromise = null;
+    this.labels = [];
+  }
+
+  /**
+   * Load ImageNet labels
+   */
+  async loadLabels() {
+    try {
+      const response = await fetch('/models/imagenet_labels.json');
+      this.labels = await response.json();
+      console.log(`Loaded ${this.labels.length} ImageNet labels`);
+    } catch (error) {
+      console.warn('Could not load ImageNet labels:', error);
+      this.labels = [];
+    }
   }
 
   /**
@@ -125,6 +184,7 @@ class WebNNClassifier {
 
   async _doInitialize() {
     await this.detectCapabilities();
+    await this.loadLabels();
     
     const modelUrl = '/models/mobilenetv2-12.onnx';
     
@@ -308,6 +368,7 @@ class WebNNClassifier {
         reason,
         topClasses: topK.slice(0, 5).map(({ index, prob }) => ({
           classIndex: index,
+          className: this.labels[index] || `class_${index}`,
           probability: prob
         })),
         backend: this.backendType,

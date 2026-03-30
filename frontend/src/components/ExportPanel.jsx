@@ -1,5 +1,5 @@
 import React from "react";
-import { Download, FileBox, FileCode, File } from "lucide-react";
+import { Download, FileBox, FileCode, File, Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
@@ -8,8 +8,8 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
-export default function ExportPanel({ onExport, disabled }) {
-  const formats = [
+export default function ExportPanel({ onExport, disabled, renderer = "gaussian" }) {
+  const gaussianFormats = [
     {
       id: "ply",
       label: "PLY",
@@ -29,6 +29,29 @@ export default function ExportPanel({ onExport, disabled }) {
       icon: File,
     },
   ];
+
+  const triangleFormats = [
+    {
+      id: "off",
+      label: "OFF",
+      description: "Object File Format - game engine ready",
+      icon: Layers,
+    },
+    {
+      id: "obj",
+      label: "OBJ",
+      description: "Universal mesh with materials",
+      icon: File,
+    },
+    {
+      id: "gltf",
+      label: "GLTF",
+      description: "Web-ready 3D format",
+      icon: FileCode,
+    },
+  ];
+
+  const formats = renderer === "triangle" ? triangleFormats : gaussianFormats;
 
   return (
     <div className="control-panel">
@@ -74,7 +97,10 @@ export default function ExportPanel({ onExport, disabled }) {
 
         {!disabled && (
           <p className="text-[0.65rem] text-[var(--outline)] text-center mt-4">
-            Exported models retain full Gaussian splat data
+            {renderer === "triangle" 
+              ? "OFF format is game engine compatible"
+              : "Exported models retain full Gaussian splat data"
+            }
           </p>
         )}
       </div>
