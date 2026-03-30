@@ -1,78 +1,114 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap');
+@import url('https://api.fontshare.com/v2/css?f[]=clash-display@400,500,600,700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* Ktheme Obsidian Crimson - CSS Variables */
+:root {
+    /* Obsidian Crimson Color System */
+    --obsidian: #0A0A0A;
+    --surface: #141414;
+    --surface-variant: #2D2D2D;
+    --secondary: #262626;
+    --crimson: #DC143C;
+    --crimson-dark: #B00F30;
+    --crimson-light: #E5395F;
+    --tertiary: #A8505A;
+    --outline: #8A8A8A;
+    --on-background: #F5F5F5;
+    --on-surface: #F5F5F5;
+    
+    /* Copper Metallic Effects */
+    --copper-base: #B87333;
+    --copper-highlight: #E8B4A0;
+    --copper-shadow: #6B3410;
+    --copper-shimmer: #F2D2B0;
+    
+    /* Gradients */
+    --processing-beam: linear-gradient(90deg, transparent, #B87333, #E8B4A0, #B87333, transparent);
+    --copper-gradient: linear-gradient(135deg, #6B3410, #B87333, #E8B4A0, #B87333, #6B3410);
+    
+    /* Shadcn Theme Overrides */
+    --background: 0 0% 4%;
+    --foreground: 0 0% 96%;
+    --card: 0 0% 8%;
+    --card-foreground: 0 0% 96%;
+    --popover: 0 0% 8%;
+    --popover-foreground: 0 0% 96%;
+    --primary: 348 85% 47%;
+    --primary-foreground: 0 0% 4%;
+    --secondary: 0 0% 15%;
+    --secondary-foreground: 0 0% 96%;
+    --muted: 0 0% 15%;
+    --muted-foreground: 0 0% 54%;
+    --accent: 0 0% 15%;
+    --accent-foreground: 0 0% 96%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 18%;
+    --input: 0 0% 18%;
+    --ring: 348 85% 47%;
+    --radius: 0.5rem;
+}
+
+/* Base Styles */
+* {
+    box-sizing: border-box;
+}
+
+html {
+    scroll-behavior: smooth;
+}
+
 body {
     margin: 0;
-    font-family:
-        -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen",
-        "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue",
-        sans-serif;
+    font-family: 'JetBrains Mono', monospace;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    background-color: var(--obsidian);
+    color: var(--on-background);
+    overflow-x: hidden;
+}
+
+/* Typography */
+h1, h2, h3, h4, h5, h6 {
+    font-family: 'Clash Display', sans-serif;
+    font-weight: 500;
+    letter-spacing: -0.02em;
 }
 
 code {
-    font-family:
-        source-code-pro, Menlo, Monaco, Consolas, "Courier New", monospace;
+    font-family: 'JetBrains Mono', monospace;
 }
 
-@layer base {
-    :root {
-        --background: 0 0% 100%;
-        --foreground: 0 0% 3.9%;
-        --card: 0 0% 100%;
-        --card-foreground: 0 0% 3.9%;
-        --popover: 0 0% 100%;
-        --popover-foreground: 0 0% 3.9%;
-        --primary: 0 0% 9%;
-        --primary-foreground: 0 0% 98%;
-        --secondary: 0 0% 96.1%;
-        --secondary-foreground: 0 0% 9%;
-        --muted: 0 0% 96.1%;
-        --muted-foreground: 0 0% 45.1%;
-        --accent: 0 0% 96.1%;
-        --accent-foreground: 0 0% 9%;
-        --destructive: 0 84.2% 60.2%;
-        --destructive-foreground: 0 0% 98%;
-        --border: 0 0% 89.8%;
-        --input: 0 0% 89.8%;
-        --ring: 0 0% 3.9%;
-        --chart-1: 12 76% 61%;
-        --chart-2: 173 58% 39%;
-        --chart-3: 197 37% 24%;
-        --chart-4: 43 74% 66%;
-        --chart-5: 27 87% 67%;
-        --radius: 0.5rem;
-    }
-    .dark {
-        --background: 0 0% 3.9%;
-        --foreground: 0 0% 98%;
-        --card: 0 0% 3.9%;
-        --card-foreground: 0 0% 98%;
-        --popover: 0 0% 3.9%;
-        --popover-foreground: 0 0% 98%;
-        --primary: 0 0% 98%;
-        --primary-foreground: 0 0% 9%;
-        --secondary: 0 0% 14.9%;
-        --secondary-foreground: 0 0% 98%;
-        --muted: 0 0% 14.9%;
-        --muted-foreground: 0 0% 63.9%;
-        --accent: 0 0% 14.9%;
-        --accent-foreground: 0 0% 98%;
-        --destructive: 0 62.8% 30.6%;
-        --destructive-foreground: 0 0% 98%;
-        --border: 0 0% 14.9%;
-        --input: 0 0% 14.9%;
-        --ring: 0 0% 83.1%;
-        --chart-1: 220 70% 50%;
-        --chart-2: 160 60% 45%;
-        --chart-3: 30 80% 55%;
-        --chart-4: 280 65% 60%;
-        --chart-5: 340 75% 55%;
-    }
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
 }
 
+::-webkit-scrollbar-track {
+    background: var(--obsidian);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--surface-variant);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--outline);
+}
+
+/* Selection */
+::selection {
+    background: var(--crimson);
+    color: var(--obsidian);
+}
+
+/* Tailwind Layer Overrides */
 @layer base {
     * {
         @apply border-border;
@@ -82,34 +118,173 @@ code {
     }
 }
 
-@layer base {
-    [data-debug-wrapper="true"] {
-        display: contents !important;
+@layer utilities {
+    /* Copper Shimmer Animation */
+    @keyframes copper-shimmer {
+        0% {
+            background-position: -200% 0;
+        }
+        100% {
+            background-position: 200% 0;
+        }
     }
+    
+    .copper-shimmer {
+        background: linear-gradient(
+            90deg,
+            var(--copper-shadow) 0%,
+            var(--copper-base) 25%,
+            var(--copper-highlight) 50%,
+            var(--copper-base) 75%,
+            var(--copper-shadow) 100%
+        );
+        background-size: 200% 100%;
+        animation: copper-shimmer 2s linear infinite;
+    }
+    
+    /* Processing Beam */
+    @keyframes processing-beam {
+        0% {
+            transform: translateX(-100%);
+        }
+        100% {
+            transform: translateX(100%);
+        }
+    }
+    
+    .processing-beam {
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .processing-beam::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: var(--processing-beam);
+        animation: processing-beam 1.5s ease-in-out infinite;
+    }
+    
+    /* Glow Effects */
+    .glow-crimson {
+        box-shadow: 0 0 20px rgba(220, 20, 60, 0.3);
+    }
+    
+    .glow-copper {
+        box-shadow: 0 0 20px rgba(184, 115, 51, 0.3);
+    }
+    
+    /* Panel Style */
+    .panel {
+        background-color: var(--surface);
+        border: 1px solid var(--surface-variant);
+        border-radius: 8px;
+    }
+    
+    /* Glass Panel */
+    .glass-panel {
+        background: rgba(20, 20, 20, 0.7);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        border: 1px solid var(--surface-variant);
+    }
+    
+    /* Upload Zone */
+    .upload-zone {
+        border: 2px dashed var(--outline);
+        transition: all 0.2s ease;
+    }
+    
+    .upload-zone:hover,
+    .upload-zone.drag-over {
+        border-color: var(--copper-base);
+        background: rgba(184, 115, 51, 0.05);
+    }
+    
+    /* Status Indicators */
+    .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+    }
+    
+    .status-active {
+        background: #22C55E;
+        box-shadow: 0 0 8px rgba(34, 197, 94, 0.5);
+    }
+    
+    .status-processing {
+        background: var(--copper-base);
+        animation: pulse 2s ease-in-out infinite;
+    }
+    
+    .status-idle {
+        background: var(--outline);
+    }
+    
+    .status-error {
+        background: var(--crimson);
+        box-shadow: 0 0 8px rgba(220, 20, 60, 0.5);
+    }
+    
+    @keyframes pulse {
+        0%, 100% {
+            opacity: 1;
+        }
+        50% {
+            opacity: 0.5;
+        }
+    }
+    
+    /* Viewer Canvas */
+    .viewer-container {
+        background: linear-gradient(145deg, #0A0A0A 0%, #0F0F0F 50%, #0A0A0A 100%);
+    }
+    
+    /* Button Hover Effects */
+    .btn-hover-copper:hover {
+        border-color: var(--copper-base);
+        box-shadow: 0 0 12px rgba(184, 115, 51, 0.2);
+    }
+    
+    .btn-hover-crimson:hover {
+        border-color: var(--crimson);
+        box-shadow: 0 0 12px rgba(220, 20, 60, 0.2);
+    }
+    
+    /* Text Gradient */
+    .text-gradient-copper {
+        background: var(--copper-gradient);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+}
 
-    [data-debug-wrapper="true"] > * {
-        margin-left: inherit;
-        margin-right: inherit;
-        margin-top: inherit;
-        margin-bottom: inherit;
-        padding-left: inherit;
-        padding-right: inherit;
-        padding-top: inherit;
-        padding-bottom: inherit;
-        column-gap: inherit;
-        row-gap: inherit;
-        gap: inherit;
-        border-left-width: inherit;
-        border-right-width: inherit;
-        border-top-width: inherit;
-        border-bottom-width: inherit;
-        border-left-style: inherit;
-        border-right-style: inherit;
-        border-top-style: inherit;
-        border-bottom-style: inherit;
-        border-left-color: inherit;
-        border-right-color: inherit;
-        border-top-color: inherit;
-        border-bottom-color: inherit;
-    }
+/* Focus States */
+*:focus-visible {
+    outline: 2px solid var(--crimson);
+    outline-offset: 2px;
+}
+
+/* Transitions */
+button, a, input, select, textarea {
+    transition: all 0.2s ease;
+}
+
+/* Tooltip Override */
+[data-radix-popper-content-wrapper] {
+    z-index: 50 !important;
+}
+
+/* Progress Bar Custom */
+.progress-copper {
+    background: var(--surface-variant);
+}
+
+.progress-copper > div {
+    background: linear-gradient(90deg, var(--copper-shadow), var(--copper-base), var(--copper-highlight));
 }
