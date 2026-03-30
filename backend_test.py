@@ -370,6 +370,36 @@ class GaussianSplattingAPITester:
         except Exception as e:
             return self.log_test("Image Classification", False, f"Error: {str(e)}")
 
+    def test_web_video_processing(self):
+        """Test generic web video URL processing endpoint (new feature)"""
+        if not self.project_id:
+            return self.log_test("Web Video Processing", False, "No project ID available")
+        
+        try:
+            # Test with various video URLs that yt-dlp should support
+            web_video_data = {
+                "urls": [
+                    "https://vimeo.com/148751763",  # Vimeo test video
+                    "https://sample-videos.com/zip/10/mp4/SampleVideo_1280x720_1mb.mp4"  # Direct MP4 link
+                ],
+                "fps": 6
+            }
+            response = requests.post(
+                f"{self.api_url}/projects/{self.project_id}/web-video",
+                json=web_video_data,
+                timeout=15
+            )
+            success = response.status_code == 200
+            details = f"Status: {response.status_code}"
+            
+            if success:
+                data = response.json()
+                details += f", Jobs created: {len(data.get('jobs', []))}, FPS: {data.get('fps', 'N/A')}"
+            
+            return self.log_test("Web Video Processing", success, details)
+        except Exception as e:
+            return self.log_test("Web Video Processing", False, f"Error: {str(e)}")
+
     def test_export_formats(self):
         """Test export functionality for different formats"""
         if not self.project_id:
@@ -423,6 +453,9 @@ class GaussianSplattingAPITester:
         self.test_youtube_video_processing()
         time.sleep(3)  # Give YouTube processing a moment to start
         self.test_youtube_status()
+        
+        # Web video processing tests (new feature)
+        self.test_web_video_processing()
         
         # Processing tests
         self.test_start_processing()

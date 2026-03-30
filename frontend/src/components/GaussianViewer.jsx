@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Box, RotateCcw, ZoomIn, ZoomOut, Move3D, Grid3X3, Eye } from "lucide-react";
+import { Box, RotateCcw, ZoomIn, ZoomOut, Move3D, Grid3X3, Eye, Video, Circle, Play, Trash2, Download } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { Button } from "@/components/ui/button";
 
 export default function GaussianViewer({ modelData, isProcessing, processingStatus }) {
   const canvasRef = useRef(null);
@@ -16,6 +17,14 @@ export default function GaussianViewer({ modelData, isProcessing, processingStat
   const [isDragging, setIsDragging] = useState(false);
   const [lastMouse, setLastMouse] = useState({ x: 0, y: 0 });
   const animationRef = useRef(null);
+  
+  // Camera path recording
+  const [isRecording, setIsRecording] = useState(false);
+  const [cameraPath, setCameraPath] = useState([]);
+  const [isPlayingPath, setIsPlayingPath] = useState(false);
+  const [showCameraPath, setShowCameraPath] = useState(true);
+  const playbackRef = useRef(null);
+  const recordingIntervalRef = useRef(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -60,6 +69,46 @@ export default function GaussianViewer({ modelData, isProcessing, processingStat
           ctx.lineTo(centerX + offset, canvas.height);
           ctx.stroke();
         }
+      }
+
+      // Draw camera path
+      if (showCameraPath && cameraPath.length > 1) {
+        ctx.strokeStyle = "#B87333";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
+        ctx.beginPath();
+        
+        cameraPath.forEach((point, idx) => {
+          // Convert camera rotation to screen position (simplified visualization)
+          const pathX = centerX + (point.y * 2);
+          const pathY = centerY - (point.x * 2);
+          
+          if (idx === 0) {
+            ctx.moveTo(pathX, pathY);
+          } else {
+            ctx.lineTo(pathX, pathY);
+          }
+        });
+        ctx.stroke();
+        ctx.setLineDash([]);
+        
+        // Draw camera position markers
+        cameraPath.forEach((point, idx) => {
+          const pathX = centerX + (point.y * 2);
+          const pathY = centerY - (point.x * 2);
+          
+          ctx.beginPath();
+          ctx.arc(pathX, pathY, 4, 0, Math.PI * 2);
+          ctx.fillStyle = idx === 0 ? "#22C55E" : idx === cameraPath.length - 1 ? "#DC143C" : "#B87333";
+          ctx.fill();
+          
+          // Draw frame number
+          if (idx % 5 === 0 || idx === cameraPath.length - 1) {
+            ctx.fillStyle = "#8A8A8A";
+            ctx.font = "10px JetBrains Mono";
+            ctx.fillText(`${idx + 1}`, pathX + 6, pathY + 3);
+          }
+        });
       }
 
       // Draw splat points if we have model data
@@ -122,7 +171,55 @@ export default function GaussianViewer({ modelData, isProcessing, processingStat
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [modelData, rotation, zoom, showGrid, showPoints, isProcessing]);
+  }, [modelData, rotation, zoom, showGrid, showPoints, isProcessing, cameraPath, showCameraPath]);
+
+  // Camera path recording
+  useEffect(() => {
+    if (isRecording) {
+      recordingIntervalRef.current = setInterval(() => {
+        setCameraPath(prev => [...prev, { x: rotation.x, y: rotation.y, zoom, timestamp: Date.now() }]);
+      }, 100); // Record position every 100ms
+    } else {
+      if (recordingIntervalRef.current) {
+        clearInterval(recordingIntervalRef.current);
+      }
+    }
+    
+    return () => {
+      if (recordingIntervalRef.current) {
+        clearInterval(recordingIntervalRef.current);
+      }
+    };
+  }, [isRecording, rotation, zoom]);
+
+  // Camera path playback
+  useEffect(() => {
+    if (isPlayingPath && cameraPath.length > 0) {
+      let currentIdx = 0;
+      
+      playbackRef.current = setInterval(() => {
+        if (currentIdx < cameraPath.length) {
+          const point = cameraPath[currentIdx];
+          setRotation({ x: point.x, y: point.y });
+          setZoom(point.zoom);
+          currentIdx++;
+        } else {
+          setIsPlayingPath(false);
+          clearInterval(playbackRef.current);
+        }
+      }, 100);
+    } else {
+      if (playbackRef.current) {
+        clearInterval(playbackRef.current);
+      }
+    }
+    
+    return () => {
+      if (playbackRef.current) {
+        clearInterval(playbackRef.current);
+      }
+    };
+  }, [isPlayingPath, cameraPath]);
 
   // Mouse handlers for rotation
   const handleMouseDown = (e) => {
@@ -154,6 +251,45 @@ export default function GaussianViewer({ modelData, isProcessing, processingStat
   const handleReset = () => {
     setRotation({ x: 0, y: 0 });
     setZoom(1);
+  };
+
+  const toggleRecording = () => {
+    if (isRecording) {
+      setIsRecording(false);
+    } else {
+      setCameraPath([]);
+      setIsRecording(true);
+    }
+  };
+
+  const clearPath = () => {
+    setCameraPath([]);
+    setIsRecording(false);
+    setIsPlayingPath(false);
+  };
+
+  const exportCameraPath = () => {
+    if (cameraPath.length === 0) return;
+    
+    const pathData = {
+      version: "1.0",
+      frames: cameraPath.length,
+      duration_ms: cameraPath.length * 100,
+      path: cameraPath.map((p, idx) => ({
+        frame: idx,
+        rotation_x: p.x,
+        rotation_y: p.y,
+        zoom: p.zoom
+      }))
+    };
+    
+    const blob = new Blob([JSON.stringify(pathData, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "camera_path.json";
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -261,8 +397,86 @@ export default function GaussianViewer({ modelData, isProcessing, processingStat
             </TooltipTrigger>
             <TooltipContent>Toggle Points</TooltipContent>
           </Tooltip>
+
+          <div className="w-px h-6 bg-[var(--surface-variant)] mx-1" />
+
+          {/* Camera Path Controls */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                className={`viewer-control-btn ${isRecording ? "active" : ""}`}
+                onClick={toggleRecording}
+                disabled={isPlayingPath}
+                data-testid="viewer-record-btn"
+              >
+                <Circle className={`w-4 h-4 ${isRecording ? "text-red-500 animate-pulse" : ""}`} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{isRecording ? "Stop Recording" : "Record Camera Path"}</TooltipContent>
+          </Tooltip>
+
+          {cameraPath.length > 0 && (
+            <>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    className={`viewer-control-btn ${isPlayingPath ? "active" : ""}`}
+                    onClick={() => setIsPlayingPath(!isPlayingPath)}
+                    disabled={isRecording}
+                    data-testid="viewer-play-btn"
+                  >
+                    <Play className="w-4 h-4" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>{isPlayingPath ? "Stop Playback" : "Play Path"}</TooltipContent>
+              </Tooltip>
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    className="viewer-control-btn"
+                    onClick={exportCameraPath}
+                    data-testid="viewer-export-path-btn"
+                  >
+                    <Download className="w-4 h-4" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>Export Camera Path</TooltipContent>
+              </Tooltip>
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    className="viewer-control-btn"
+                    onClick={clearPath}
+                    data-testid="viewer-clear-path-btn"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>Clear Path</TooltipContent>
+              </Tooltip>
+            </>
+          )}
         </TooltipProvider>
       </div>
+
+      {/* Recording indicator */}
+      {isRecording && (
+        <div className="absolute top-4 right-4 flex items-center gap-2 glass-panel px-3 py-2 rounded-lg">
+          <Circle className="w-3 h-3 text-red-500 animate-pulse fill-red-500" />
+          <span className="text-xs text-[var(--on-surface)]">Recording: {cameraPath.length} frames</span>
+        </div>
+      )}
+
+      {/* Camera path info */}
+      {cameraPath.length > 0 && !isRecording && (
+        <div className="absolute top-4 right-4 glass-panel px-3 py-2 rounded-lg">
+          <p className="text-xs text-[var(--copper-base)]">
+            Camera Path: {cameraPath.length} keyframes ({(cameraPath.length * 0.1).toFixed(1)}s)
+          </p>
+        </div>
+      )}
 
       {/* Rotation Info */}
       {modelData && (

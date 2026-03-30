@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useRef } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { UploadCloud, Image, Youtube, Video, Plus, X, Loader2 } from "lucide-react";
+import { UploadCloud, Image, Youtube, Video, Link2, Plus, X, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -23,9 +23,12 @@ export default function ImageUploader({ projectId, onImagesUploaded, disabled })
   const [isUploading, setIsUploading] = useState(false);
   const [activeTab, setActiveTab] = useState("upload");
   const [youtubeUrls, setYoutubeUrls] = useState([""]);
+  const [webVideoUrls, setWebVideoUrls] = useState([""]);
   const [isYoutubeDialogOpen, setIsYoutubeDialogOpen] = useState(false);
   const [isProcessingYoutube, setIsProcessingYoutube] = useState(false);
   const [isVideoDialogOpen, setIsVideoDialogOpen] = useState(false);
+  const [isWebVideoDialogOpen, setIsWebVideoDialogOpen] = useState(false);
+  const [isProcessingWebVideo, setIsProcessingWebVideo] = useState(false);
   const [isUploadingVideo, setIsUploadingVideo] = useState(false);
   const videoInputRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -263,6 +266,55 @@ export default function ImageUploader({ projectId, onImagesUploaded, disabled })
     }
   };
 
+  // Web video URL handlers
+  const addWebVideoUrl = () => {
+    setWebVideoUrls([...webVideoUrls, ""]);
+  };
+
+  const removeWebVideoUrl = (index) => {
+    setWebVideoUrls(webVideoUrls.filter((_, i) => i !== index));
+  };
+
+  const updateWebVideoUrl = (index, value) => {
+    const newUrls = [...webVideoUrls];
+    newUrls[index] = value;
+    setWebVideoUrls(newUrls);
+  };
+
+  const handleWebVideoSubmit = async () => {
+    const validUrls = webVideoUrls.filter(
+      (url) => url.trim() && (url.startsWith("http://") || url.startsWith("https://"))
+    );
+
+    if (validUrls.length === 0) {
+      toast.error("Please enter at least one valid video URL");
+      return;
+    }
+
+    setIsProcessingWebVideo(true);
+
+    try {
+      const response = await axios.post(`${API}/projects/${projectId}/web-video`, {
+        urls: validUrls,
+        fps: 6,
+      });
+
+      toast.success(
+        `Started extracting frames from ${response.data.jobs.length} video(s). Architecture/landscape frames will be kept.`
+      );
+      setIsWebVideoDialogOpen(false);
+      setWebVideoUrls([""]);
+
+      // Start polling for status
+      pollYoutubeStatus();
+    } catch (error) {
+      console.error("Web video processing error:", error);
+      toast.error("Failed to start video processing");
+    } finally {
+      setIsProcessingWebVideo(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       {/* Upload Zone */}
@@ -308,19 +360,19 @@ export default function ImageUploader({ projectId, onImagesUploaded, disabled })
         )}
       </div>
 
-      {/* Video Options - YouTube & Direct Upload */}
-      <div className="flex gap-2">
+      {/* Video Options - Upload, Web URL, YouTube */}
+      <div className="grid grid-cols-3 gap-2">
         {/* Direct Video Upload */}
         <Dialog open={isVideoDialogOpen} onOpenChange={setIsVideoDialogOpen}>
           <DialogTrigger asChild>
             <Button
               variant="outline"
-              className="flex-1 border-[var(--surface-variant)] bg-transparent hover:bg-[var(--surface-variant)] hover:border-[var(--copper-base)] text-[var(--on-surface)]"
+              className="border-[var(--surface-variant)] bg-transparent hover:bg-[var(--surface-variant)] hover:border-[var(--copper-base)] text-[var(--on-surface)] text-xs px-2"
               disabled={disabled}
               data-testid="video-upload-btn"
             >
-              <Video className="w-4 h-4 mr-2 text-[var(--copper-base)]" />
-              Upload Video
+              <Video className="w-3 h-3 mr-1 text-[var(--copper-base)]" />
+              File
             </Button>
           </DialogTrigger>
           <DialogContent className="bg-[var(--surface)] border-[var(--surface-variant)] text-[var(--on-surface)] max-w-md">
@@ -374,17 +426,112 @@ export default function ImageUploader({ projectId, onImagesUploaded, disabled })
           </DialogContent>
         </Dialog>
 
+        {/* Web Video URL Option */}
+        <Dialog open={isWebVideoDialogOpen} onOpenChange={setIsWebVideoDialogOpen}>
+          <DialogTrigger asChild>
+            <Button
+              variant="outline"
+              className="border-[var(--surface-variant)] bg-transparent hover:bg-[var(--surface-variant)] hover:border-[var(--copper-base)] text-[var(--on-surface)] text-xs px-2"
+              disabled={disabled}
+              data-testid="web-video-btn"
+            >
+              <Link2 className="w-3 h-3 mr-1 text-blue-400" />
+              URL
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="bg-[var(--surface)] border-[var(--surface-variant)] text-[var(--on-surface)] max-w-lg">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-[var(--on-surface)]">
+                <Link2 className="w-5 h-5 text-blue-400" />
+                Add Video URLs
+              </DialogTitle>
+              <DialogDescription className="text-[var(--outline)]">
+                Paste any video URL (Vimeo, Twitter/X, Dailymotion, direct .mp4 links, etc.).
+                Frames are extracted at 6 FPS with architecture/landscape filtering.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-3 py-4">
+              {webVideoUrls.map((url, index) => (
+                <div key={index} className="flex gap-2">
+                  <Input
+                    value={url}
+                    onChange={(e) => updateWebVideoUrl(index, e.target.value)}
+                    placeholder="https://vimeo.com/... or https://example.com/video.mp4"
+                    className="flex-1 bg-[var(--secondary)] border-[var(--surface-variant)] text-[var(--on-surface)] placeholder:text-[var(--outline)]"
+                    data-testid={`web-video-url-input-${index}`}
+                  />
+                  {webVideoUrls.length > 1 && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => removeWebVideoUrl(index)}
+                      className="text-[var(--outline)] hover:text-[var(--crimson)]"
+                    >
+                      <X className="w-4 h-4" />
+                    </Button>
+                  )}
+                </div>
+              ))}
+
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={addWebVideoUrl}
+                className="text-[var(--copper-base)] hover:text-[var(--copper-highlight)]"
+                data-testid="add-web-video-url-btn"
+              >
+                <Plus className="w-4 h-4 mr-1" />
+                Add Another URL
+              </Button>
+            </div>
+
+            <div className="bg-[var(--secondary)] rounded-lg p-3 text-xs text-[var(--outline)]">
+              <p className="font-medium text-[var(--on-surface)] mb-1">Supported Sources:</p>
+              <p>Vimeo, Twitter/X, Dailymotion, Facebook, Instagram, TikTok, direct video URLs (.mp4, .webm), and 1000+ more sites.</p>
+            </div>
+
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setIsWebVideoDialogOpen(false)}
+                className="border-[var(--surface-variant)]"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleWebVideoSubmit}
+                disabled={isProcessingWebVideo}
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+                data-testid="web-video-submit-btn"
+              >
+                {isProcessingWebVideo ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Processing...
+                  </>
+                ) : (
+                  <>
+                    <Link2 className="w-4 h-4 mr-2" />
+                    Extract Frames
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         {/* YouTube Option */}
         <Dialog open={isYoutubeDialogOpen} onOpenChange={setIsYoutubeDialogOpen}>
           <DialogTrigger asChild>
             <Button
               variant="outline"
-              className="flex-1 border-[var(--surface-variant)] bg-transparent hover:bg-[var(--surface-variant)] hover:border-[var(--copper-base)] text-[var(--on-surface)]"
+              className="border-[var(--surface-variant)] bg-transparent hover:bg-[var(--surface-variant)] hover:border-[var(--copper-base)] text-[var(--on-surface)] text-xs px-2"
               disabled={disabled}
               data-testid="youtube-upload-btn"
             >
-              <Youtube className="w-4 h-4 mr-2 text-red-500" />
-              YouTube
+              <Youtube className="w-3 h-3 mr-1 text-red-500" />
+              YT
             </Button>
           </DialogTrigger>
           <DialogContent className="bg-[var(--surface)] border-[var(--surface-variant)] text-[var(--on-surface)] max-w-lg">
@@ -436,7 +583,7 @@ export default function ImageUploader({ projectId, onImagesUploaded, disabled })
 
             <div className="bg-[var(--secondary)] rounded-lg p-3 text-xs text-[var(--outline)]">
               <p className="font-medium text-[var(--on-surface)] mb-1">Note:</p>
-              <p>YouTube downloads may be blocked in some environments. For reliable results, use the "Upload Video" option instead.</p>
+              <p>YouTube downloads may be blocked in some environments. For reliable results, use the "URL" option for other video sources or upload directly.</p>
             </div>
 
             <DialogFooter>

@@ -93,6 +93,10 @@ class YouTubeRequest(BaseModel):
     urls: List[str]
     fps: int = 6
 
+class WebVideoRequest(BaseModel):
+    urls: List[str]
+    fps: int = 6
+
 class VideoUploadRequest(BaseModel):
     fps: int = 6
 
@@ -632,6 +636,40 @@ async def get_youtube_status(project_id: str):
     """Get status of all YouTube extraction jobs for a project"""
     jobs = await db.video_jobs.find({"project_id": project_id}, {"_id": 0}).to_list(100)
     return jobs
+
+# Generic Web Video URL Processing
+@api_router.post("/projects/{project_id}/web-video")
+async def add_web_videos(project_id: str, request: WebVideoRequest, background_tasks: BackgroundTasks):
+    """Add any web video URLs to extract frames from (supports YouTube, Vimeo, Twitter, etc.)"""
+    project = await db.projects.find_one({"id": project_id}, {"_id": 0})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    jobs = []
+    for url in request.urls:
+        url = url.strip()
+        if not url:
+            continue
+        
+        # Validate URL format
+        if not (url.startswith("http://") or url.startswith("https://")):
+            continue
+        
+        job = VideoExtractionJob(project_id=project_id, video_url=url)
+        await db.video_jobs.insert_one(job.model_dump())
+        
+        # Start background extraction using yt-dlp (supports many sites)
+        background_tasks.add_task(
+            download_and_extract_youtube,
+            job.id,
+            project_id,
+            url,
+            request.fps
+        )
+        
+        jobs.append({"job_id": job.id, "url": url, "status": "queued"})
+    
+    return {"jobs": jobs, "fps": request.fps}
 
 # Processing
 async def simulate_processing(job_id: str, project_id: str):
