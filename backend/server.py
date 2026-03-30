@@ -93,6 +93,9 @@ class YouTubeRequest(BaseModel):
     urls: List[str]
     fps: int = 6
 
+class VideoUploadRequest(BaseModel):
+    fps: int = 6
+
 class VideoExtractionJob(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -279,15 +282,37 @@ async def download_and_extract_youtube(job_id: str, project_id: str, video_url: 
         if not video_files:
             raise Exception("Video download failed - no file found")
         
-        video_path = video_files[0]
+        video_path = str(video_files[0])
         
+        # Continue with frame extraction
+        await extract_frames_from_video(job_id, project_id, video_path, fps)
+        
+    except Exception as e:
+        logging.error(f"YouTube extraction failed: {str(e)}")
+        await db.video_jobs.update_one(
+            {"id": job_id},
+            {"$set": {
+                "status": "failed",
+                "current_step": "Failed",
+                "error_message": str(e),
+                "completed_at": datetime.now(timezone.utc).isoformat()
+            }}
+        )
+
+
+async def extract_frames_from_video(job_id: str, project_id: str, video_path: str, fps: int = 6):
+    """Extract frames from a video file and classify them"""
+    import cv2
+    
+    try:
         # Update status
         await db.video_jobs.update_one(
             {"id": job_id},
             {"$set": {
                 "status": "extracting",
                 "current_step": f"Extracting frames at {fps} FPS...",
-                "progress": 20
+                "progress": 20,
+                "started_at": datetime.now(timezone.utc).isoformat()
             }}
         )
         
@@ -295,10 +320,10 @@ async def download_and_extract_youtube(job_id: str, project_id: str, video_url: 
         frames_dir = FRAMES_DIR / project_id / job_id
         frames_dir.mkdir(parents=True, exist_ok=True)
         
-        cap = cv2.VideoCapture(str(video_path))
+        cap = cv2.VideoCapture(video_path)
         video_fps = cap.get(cv2.CAP_PROP_FPS)
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        frame_interval = max(1, int(video_fps / fps))  # Extract at specified fps
+        frame_interval = max(1, int(video_fps / fps))
         
         frame_count = 0
         extracted_count = 0
@@ -315,9 +340,8 @@ async def download_and_extract_youtube(job_id: str, project_id: str, video_url: 
                 cv2.imwrite(str(frame_path), frame)
                 extracted_count += 1
                 
-                # Update progress periodically
                 if extracted_count % 10 == 0:
-                    progress = 20 + (frame_count / total_frames) * 40
+                    progress = 20 + (frame_count / max(total_frames, 1)) * 40
                     await db.video_jobs.update_one(
                         {"id": job_id},
                         {"$set": {
@@ -343,7 +367,8 @@ async def download_and_extract_youtube(job_id: str, project_id: str, video_url: 
         )
         
         # Classify frames
-        for i, frame_file in enumerate(sorted(frames_dir.glob("*.jpg"))):
+        frame_files = sorted(frames_dir.glob("*.jpg"))
+        for i, frame_file in enumerate(frame_files):
             result = classify_frame_simple(str(frame_file))
             
             if result["classification"] in ["architecture", "landscape", "scene"]:
@@ -353,23 +378,20 @@ async def download_and_extract_youtube(job_id: str, project_id: str, video_url: 
                     "confidence": result["confidence"]
                 })
                 
-                # Save to database
                 image_record = ImageUpload(
                     project_id=project_id,
                     filename=frame_file.name,
                     file_path=str(frame_file),
-                    source="youtube",
+                    source="video",
                     classification=result["classification"]
                 )
                 await db.images.insert_one(image_record.model_dump())
             else:
-                # Delete filtered frames
                 frame_file.unlink()
                 rejected_count += 1
             
-            # Update progress
             if (i + 1) % 10 == 0:
-                progress = 60 + ((i + 1) / extracted_count) * 35
+                progress = 60 + ((i + 1) / max(extracted_count, 1)) * 35
                 await db.video_jobs.update_one(
                     {"id": job_id},
                     {"$set": {
@@ -393,7 +415,9 @@ async def download_and_extract_youtube(job_id: str, project_id: str, video_url: 
         )
         
         # Cleanup video file
-        shutil.rmtree(video_dir)
+        video_dir = VIDEOS_DIR / job_id
+        if video_dir.exists():
+            shutil.rmtree(video_dir)
         
         # Complete
         await db.video_jobs.update_one(
@@ -409,7 +433,7 @@ async def download_and_extract_youtube(job_id: str, project_id: str, video_url: 
         )
         
     except Exception as e:
-        logging.error(f"YouTube extraction failed: {str(e)}")
+        logging.error(f"Video extraction failed: {str(e)}")
         await db.video_jobs.update_one(
             {"id": job_id},
             {"$set": {
@@ -558,6 +582,50 @@ async def add_youtube_videos(project_id: str, request: YouTubeRequest, backgroun
         jobs.append({"job_id": job.id, "url": url, "status": "queued"})
     
     return {"jobs": jobs, "fps": request.fps}
+
+# Direct Video Upload Processing
+@api_router.post("/projects/{project_id}/video-upload")
+async def upload_video(project_id: str, file: UploadFile = File(...), fps: int = 6, background_tasks: BackgroundTasks = None):
+    """Upload a video file directly to extract frames from"""
+    project = await db.projects.find_one({"id": project_id}, {"_id": 0})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    # Validate file type
+    allowed_types = ["video/mp4", "video/webm", "video/quicktime", "video/x-msvideo", "video/mpeg"]
+    if file.content_type not in allowed_types:
+        raise HTTPException(status_code=400, detail=f"Invalid file type. Allowed: MP4, WebM, MOV, AVI, MPEG")
+    
+    # Save video file
+    job_id = str(uuid.uuid4())
+    video_dir = VIDEOS_DIR / job_id
+    video_dir.mkdir(exist_ok=True)
+    
+    file_ext = Path(file.filename).suffix if file.filename else ".mp4"
+    video_path = video_dir / f"video{file_ext}"
+    
+    content = await file.read()
+    with open(video_path, "wb") as f:
+        f.write(content)
+    
+    # Create job record
+    job = VideoExtractionJob(
+        id=job_id,
+        project_id=project_id,
+        video_url=f"file://{video_path}"
+    )
+    await db.video_jobs.insert_one(job.model_dump())
+    
+    # Start background extraction
+    background_tasks.add_task(
+        extract_frames_from_video,
+        job_id,
+        project_id,
+        str(video_path),
+        fps
+    )
+    
+    return {"job_id": job_id, "filename": file.filename, "status": "processing", "fps": fps}
 
 @api_router.get("/projects/{project_id}/youtube-status")
 async def get_youtube_status(project_id: str):
