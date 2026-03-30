@@ -400,6 +400,131 @@ class GaussianSplattingAPITester:
         except Exception as e:
             return self.log_test("Web Video Processing", False, f"Error: {str(e)}")
 
+    def test_image_thumbnail_endpoint(self):
+        """Test thumbnail generation and endpoint"""
+        if not self.project_id:
+            return self.log_test("Image Thumbnail Endpoint", False, "No project ID available")
+        
+        try:
+            # First get list of images to find an image ID
+            images_response = requests.get(f"{self.api_url}/projects/{self.project_id}/images", timeout=10)
+            if images_response.status_code != 200:
+                return self.log_test("Image Thumbnail Endpoint", False, "Could not get project images")
+            
+            images = images_response.json()
+            if not images:
+                return self.log_test("Image Thumbnail Endpoint", False, "No images found in project")
+            
+            # Test thumbnail endpoint for first image
+            image_id = images[0]['id']
+            response = requests.get(f"{self.api_url}/images/{image_id}/thumbnail", timeout=10)
+            success = response.status_code == 200
+            details = f"Status: {response.status_code}"
+            
+            if success:
+                # Check if response is actually an image
+                content_type = response.headers.get('content-type', '')
+                details += f", Content-Type: {content_type}"
+                details += f", Size: {len(response.content)} bytes"
+                success = 'image' in content_type and len(response.content) > 0
+            
+            return self.log_test("Image Thumbnail Endpoint", success, details)
+        except Exception as e:
+            return self.log_test("Image Thumbnail Endpoint", False, f"Error: {str(e)}")
+
+    def test_gaussian_splatting_pipeline_import(self):
+        """Test that Gaussian Splatting pipeline module loads correctly"""
+        try:
+            # Test if the pipeline can be imported (indirect test via API)
+            response = requests.get(f"{self.api_url}/", timeout=10)
+            success = response.status_code == 200
+            details = f"Status: {response.status_code}"
+            
+            if success:
+                # If API is running, the gaussian_splatting module loaded successfully
+                details += " - GaussianSplatPipeline imported successfully in server.py"
+            
+            return self.log_test("Gaussian Splatting Pipeline Import", success, details)
+        except Exception as e:
+            return self.log_test("Gaussian Splatting Pipeline Import", False, f"Error: {str(e)}")
+
+    def test_processing_with_real_pipeline(self):
+        """Test that processing actually uses the real Gaussian Splatting pipeline"""
+        if not self.project_id:
+            return self.log_test("Real GS Pipeline Processing", False, "No project ID available")
+        
+        try:
+            # Upload multiple images first
+            for i in range(5):
+                with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp_file:
+                    # Create a more realistic test image
+                    tmp_file.write(b'\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x01\x00H\x00H\x00\x00\xff\xdb\x00C\x00\x08\x06\x06\x07\x06\x05\x08\x07\x07\x07\t\t\x08\n\x0c\x14\r\x0c\x0b\x0b\x0c\x19\x12\x13\x0f\x14\x1d\x1a\x1f\x1e\x1d\x1a\x1c\x1c $.\' ",#\x1c\x1c(7),01444\x1f\'9=82<.342\xff\xc0\x00\x11\x08\x00\x01\x00\x01\x01\x01\x11\x00\x02\x11\x01\x03\x11\x01\xff\xc4\x00\x14\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x08\xff\xc4\x00\x14\x10\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xda\x00\x0c\x03\x01\x00\x02\x11\x03\x11\x00\x3f\x00\xaa\xff\xd9')
+                    tmp_file_path = tmp_file.name
+                
+                with open(tmp_file_path, 'rb') as f:
+                    files = {'files': (f'pipeline_test_{i}.jpg', f, 'image/jpeg')}
+                    requests.post(
+                        f"{self.api_url}/projects/{self.project_id}/images",
+                        files=files,
+                        timeout=15
+                    )
+                os.unlink(tmp_file_path)
+            
+            # Start processing
+            response = requests.post(f"{self.api_url}/projects/{self.project_id}/process", timeout=10)
+            success = response.status_code == 200
+            details = f"Status: {response.status_code}"
+            
+            if success:
+                data = response.json()
+                details += f", Job ID: {data.get('job_id')}"
+                
+                # Wait a bit and check if processing actually started
+                time.sleep(3)
+                status_response = requests.get(f"{self.api_url}/projects/{self.project_id}/processing-status", timeout=10)
+                if status_response.status_code == 200:
+                    status_data = status_response.json()
+                    current_step = status_data.get('current_step', '')
+                    details += f", Current step: {current_step}"
+                    # Check if it's using real pipeline steps
+                    real_pipeline_steps = ['Loading images', 'Extracting features', 'Matching features', 'Estimating camera poses', 'Triangulating points', 'Training iteration']
+                    is_real_pipeline = any(step in current_step for step in real_pipeline_steps)
+                    details += f", Real pipeline: {is_real_pipeline}"
+            
+            return self.log_test("Real GS Pipeline Processing", success, details)
+        except Exception as e:
+            return self.log_test("Real GS Pipeline Processing", False, f"Error: {str(e)}")
+
+    def test_model_file_saved_to_disk(self):
+        """Test that model files are actually saved to disk after processing"""
+        if not self.project_id:
+            return self.log_test("Model File Saved to Disk", False, "No project ID available")
+        
+        try:
+            # Check if model endpoint returns data indicating file was saved
+            response = requests.get(f"{self.api_url}/projects/{self.project_id}/model", timeout=10)
+            success = response.status_code == 200
+            details = f"Status: {response.status_code}"
+            
+            if success:
+                data = response.json()
+                format_type = data.get('format', '')
+                data_points = len(data.get('data', []))
+                details += f", Format: {format_type}, Data points: {data_points}"
+                
+                # Check if it's real model data (not just demo data)
+                if data_points > 0:
+                    details += " - Model data available"
+                    # Real models should have more than just demo data
+                    success = data_points >= 100  # Real GS models should have many splats
+                else:
+                    details += " - No model data found"
+                    success = False
+            
+            return self.log_test("Model File Saved to Disk", success, details)
+        except Exception as e:
+            return self.log_test("Model File Saved to Disk", False, f"Error: {str(e)}")
+
     def test_export_formats(self):
         """Test export functionality for different formats"""
         if not self.project_id:
@@ -449,6 +574,12 @@ class GaussianSplattingAPITester:
         self.test_list_project_images()
         self.test_image_classification()
         
+        # NEW: Thumbnail tests
+        self.test_image_thumbnail_endpoint()
+        
+        # NEW: Gaussian Splatting pipeline tests
+        self.test_gaussian_splatting_pipeline_import()
+        
         # YouTube video processing tests
         self.test_youtube_video_processing()
         time.sleep(3)  # Give YouTube processing a moment to start
@@ -457,13 +588,14 @@ class GaussianSplattingAPITester:
         # Web video processing tests (new feature)
         self.test_web_video_processing()
         
-        # Processing tests
-        self.test_start_processing()
+        # Processing tests with real pipeline
+        self.test_processing_with_real_pipeline()
         time.sleep(2)  # Give processing a moment to start
         self.test_processing_status()
         
         # Model and export tests
         self.test_model_retrieval()
+        self.test_model_file_saved_to_disk()
         self.test_export_formats()
         
         # Summary

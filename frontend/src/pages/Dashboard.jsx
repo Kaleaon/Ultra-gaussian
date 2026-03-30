@@ -320,13 +320,25 @@ export default function Dashboard() {
                 <div className="image-grid">
                   {images.slice(0, 9).map((img) => (
                     <div key={img.id} className="image-thumb" title={img.classification || "image"}>
-                      <div className="w-full h-full bg-[var(--surface-variant)] flex items-center justify-center relative">
-                        <Box className="w-5 h-5 text-[var(--outline)]" />
-                        {img.source === "youtube" && (
-                          <Youtube className="absolute bottom-1 right-1 w-3 h-3 text-red-500" />
+                      <div className="w-full h-full bg-[var(--surface-variant)] flex items-center justify-center relative overflow-hidden">
+                        {/* Thumbnail image */}
+                        <img
+                          src={`${BACKEND_URL}/api/images/${img.id}/thumbnail`}
+                          alt={img.filename}
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            e.target.style.display = 'none';
+                            e.target.nextSibling.style.display = 'flex';
+                          }}
+                        />
+                        <div className="w-full h-full items-center justify-center hidden absolute inset-0 bg-[var(--surface-variant)]">
+                          <Box className="w-5 h-5 text-[var(--outline)]" />
+                        </div>
+                        {(img.source === "youtube" || img.source === "video") && (
+                          <Youtube className="absolute bottom-1 right-1 w-3 h-3 text-red-500 drop-shadow-md" />
                         )}
                         {img.classification && (
-                          <span className="absolute top-1 left-1 text-[0.5rem] px-1 bg-[var(--surface)] rounded text-[var(--copper-base)]">
+                          <span className="absolute top-1 left-1 text-[0.5rem] px-1 bg-[var(--surface)]/80 backdrop-blur-sm rounded text-[var(--copper-base)]">
                             {img.classification.slice(0, 4)}
                           </span>
                         )}

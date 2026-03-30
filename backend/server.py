@@ -1,5 +1,5 @@
 from fastapi import FastAPI, APIRouter, File, UploadFile, HTTPException, BackgroundTasks
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -13,6 +13,10 @@ from datetime import datetime, timezone
 import json
 import asyncio
 import shutil
+import base64
+
+# Import Gaussian Splatting pipeline
+from gaussian_splatting import GaussianSplatPipeline, generate_thumbnail
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -31,6 +35,8 @@ FRAMES_DIR = ROOT_DIR / "frames"
 FRAMES_DIR.mkdir(exist_ok=True)
 VIDEOS_DIR = ROOT_DIR / "videos"
 VIDEOS_DIR.mkdir(exist_ok=True)
+THUMBNAILS_DIR = ROOT_DIR / "thumbnails"
+THUMBNAILS_DIR.mkdir(exist_ok=True)
 
 # Create the main app
 app = FastAPI(title="Instant3D - Gaussian Splatting API")
@@ -527,6 +533,16 @@ async def upload_images(project_id: str, files: List[UploadFile] = File(...)):
         
         # Only accept architecture/landscape/scene images
         if classification_result["classification"] in ["architecture", "landscape", "scene"]:
+            # Generate thumbnail
+            thumbnail_data = generate_thumbnail(str(file_path))
+            thumbnail_path = None
+            if thumbnail_data:
+                thumb_dir = THUMBNAILS_DIR / project_id
+                thumb_dir.mkdir(exist_ok=True)
+                thumbnail_path = thumb_dir / f"{file_id}_thumb.jpg"
+                with open(thumbnail_path, 'wb') as tf:
+                    tf.write(thumbnail_data)
+            
             image = ImageUpload(
                 project_id=project_id,
                 filename=file.filename or f"{file_id}{file_ext}",
@@ -534,11 +550,14 @@ async def upload_images(project_id: str, files: List[UploadFile] = File(...)):
                 source="upload",
                 classification=classification_result["classification"]
             )
-            await db.images.insert_one(image.model_dump())
+            doc = image.model_dump()
+            doc["thumbnail_path"] = str(thumbnail_path) if thumbnail_path else None
+            await db.images.insert_one(doc)
             uploaded.append({
                 "id": image.id,
                 "filename": image.filename,
-                "classification": classification_result["classification"]
+                "classification": classification_result["classification"],
+                "has_thumbnail": thumbnail_path is not None
             })
         else:
             # Delete filtered image
@@ -556,6 +575,27 @@ async def upload_images(project_id: str, files: List[UploadFile] = File(...)):
 async def list_project_images(project_id: str):
     images = await db.images.find({"project_id": project_id}, {"_id": 0}).to_list(1000)
     return images
+
+# Thumbnail endpoint
+@api_router.get("/images/{image_id}/thumbnail")
+async def get_image_thumbnail(image_id: str):
+    """Get thumbnail for an image"""
+    image = await db.images.find_one({"id": image_id}, {"_id": 0})
+    if not image:
+        raise HTTPException(status_code=404, detail="Image not found")
+    
+    thumbnail_path = image.get("thumbnail_path")
+    if thumbnail_path and Path(thumbnail_path).exists():
+        return FileResponse(thumbnail_path, media_type="image/jpeg")
+    
+    # Generate thumbnail on the fly if not exists
+    file_path = image.get("file_path")
+    if file_path and Path(file_path).exists():
+        thumbnail_data = generate_thumbnail(file_path)
+        if thumbnail_data:
+            return Response(content=thumbnail_data, media_type="image/jpeg")
+    
+    raise HTTPException(status_code=404, detail="Thumbnail not available")
 
 # YouTube Video Processing
 @api_router.post("/projects/{project_id}/youtube")
@@ -672,58 +712,79 @@ async def add_web_videos(project_id: str, request: WebVideoRequest, background_t
     return {"jobs": jobs, "fps": request.fps}
 
 # Processing
-async def simulate_processing(job_id: str, project_id: str):
-    """Simulate Gaussian Splatting processing steps"""
+async def run_gaussian_splatting(job_id: str, project_id: str, settings: dict = None):
+    """Run actual Gaussian Splatting pipeline with SfM and training"""
     
-    steps = [
-        ("Detecting camera poses (COLMAP)", 10),
-        ("Extracting features", 25),
-        ("Point cloud initialization", 35),
-        ("Gaussian optimization - iteration 5000", 50),
-        ("Gaussian optimization - iteration 15000", 65),
-        ("Gaussian optimization - iteration 25000", 80),
-        ("Densification complete", 90),
-        ("Generating splat model", 95),
-        ("Finalizing export", 100),
-    ]
-    
-    await db.processing_jobs.update_one(
-        {"id": job_id},
-        {"$set": {"status": "preprocessing", "started_at": datetime.now(timezone.utc).isoformat()}}
-    )
-    
-    for step_name, progress in steps:
-        await asyncio.sleep(2)
-        status = "training" if progress > 30 else "preprocessing"
-        if progress >= 90:
-            status = "postprocessing"
+    try:
+        # Get project images directory
+        project_images_dir = UPLOAD_DIR / project_id
+        frames_dir = FRAMES_DIR / project_id
+        
+        # Use whichever has more images
+        if frames_dir.exists() and len(list(frames_dir.glob("**/*.jpg"))) > len(list(project_images_dir.glob("*"))):
+            image_dir = frames_dir
+        else:
+            image_dir = project_images_dir
+        
+        output_dir = MODELS_DIR / project_id
+        
+        # Progress callback
+        async def progress_callback(msg: str, progress: float):
+            status = "preprocessing" if progress < 30 else "training" if progress < 90 else "postprocessing"
+            await db.processing_jobs.update_one(
+                {"id": job_id},
+                {"$set": {"status": status, "progress": progress, "current_step": msg}}
+            )
+            await db.projects.update_one(
+                {"id": project_id},
+                {"$set": {"processing_progress": progress, "status": "processing"}}
+            )
         
         await db.processing_jobs.update_one(
             {"id": job_id},
-            {"$set": {"status": status, "progress": progress, "current_step": step_name}}
+            {"$set": {"status": "preprocessing", "started_at": datetime.now(timezone.utc).isoformat()}}
+        )
+        
+        # Run the pipeline
+        pipeline = GaussianSplatPipeline(str(image_dir), str(output_dir))
+        splats = await pipeline.run(progress_callback=progress_callback, settings=settings)
+        
+        # Complete
+        await db.processing_jobs.update_one(
+            {"id": job_id},
+            {"$set": {
+                "status": "completed",
+                "progress": 100,
+                "current_step": f"Complete - {len(splats)} Gaussians",
+                "completed_at": datetime.now(timezone.utc).isoformat()
+            }}
         )
         await db.projects.update_one(
             {"id": project_id},
-            {"$set": {"processing_progress": progress, "status": "processing"}}
+            {"$set": {
+                "status": "completed",
+                "processing_progress": 100,
+                "model_url": f"/api/projects/{project_id}/model"
+            }}
         )
-    
-    await db.processing_jobs.update_one(
-        {"id": job_id},
-        {"$set": {
-            "status": "completed",
-            "progress": 100,
-            "current_step": "Complete",
-            "completed_at": datetime.now(timezone.utc).isoformat()
-        }}
-    )
-    await db.projects.update_one(
-        {"id": project_id},
-        {"$set": {
-            "status": "completed",
-            "processing_progress": 100,
-            "model_url": f"/api/projects/{project_id}/model"
-        }}
-    )
+        
+        logger.info(f"Gaussian Splatting complete for project {project_id}: {len(splats)} splats")
+        
+    except Exception as e:
+        logger.error(f"Gaussian Splatting failed for project {project_id}: {str(e)}")
+        await db.processing_jobs.update_one(
+            {"id": job_id},
+            {"$set": {
+                "status": "failed",
+                "current_step": "Failed",
+                "error_message": str(e),
+                "completed_at": datetime.now(timezone.utc).isoformat()
+            }}
+        )
+        await db.projects.update_one(
+            {"id": project_id},
+            {"$set": {"status": "failed"}}
+        )
 
 @api_router.post("/projects/{project_id}/process")
 async def start_processing(project_id: str, background_tasks: BackgroundTasks):
@@ -744,7 +805,9 @@ async def start_processing(project_id: str, background_tasks: BackgroundTasks):
     job = ProcessingJob(project_id=project_id)
     await db.processing_jobs.insert_one(job.model_dump())
     
-    background_tasks.add_task(simulate_processing, job.id, project_id)
+    # Use real Gaussian Splatting pipeline
+    settings = project.get("settings", {})
+    background_tasks.add_task(run_gaussian_splatting, job.id, project_id, settings)
     
     return {"job_id": job.id, "status": "started"}
 
@@ -766,6 +829,14 @@ async def get_model(project_id: str):
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     
+    # Try to load real trained model
+    model_path = MODELS_DIR / project_id / "model.json"
+    if model_path.exists():
+        with open(model_path) as f:
+            model_data = json.load(f)
+            return {"format": "splat", "data": model_data.get("splats", []), "project_id": project_id}
+    
+    # Fallback to demo data
     demo_splat_data = generate_demo_splat_data()
     return {"format": "splat", "data": demo_splat_data, "project_id": project_id}
 
