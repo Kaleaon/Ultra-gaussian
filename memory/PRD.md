@@ -1,22 +1,23 @@
 # Instant3D - Gaussian Splatting 3D Model Generator
 
 ## Original Problem Statement
-Create an app that makes a 3D model from multiple pictures using Gaussian Splatting and on-device NPU or TPU. Allow for using YouTube videos or videos, extracting pictures from videos. Focus only on land/architecture, not vehicles or people.
+Create an app that makes a 3D model from multiple pictures using Gaussian Splatting and on-device NPU or TPU. Allow for using YouTube videos or videos, extracting pictures from videos. Focus only on land/architecture, not vehicles or people. Added: Camera path recording to show where the camera was, and ability to link to any web video.
 
 ## User Personas
 1. **Architects/Designers** - Need quick 3D reconstructions of buildings
 2. **Real Estate Professionals** - Create 3D tours from video walkthroughs
 3. **Urban Planners** - Document and model cityscapes
-4. **Hobbyists** - Create 3D models of landmarks
+4. **Content Creators** - Generate 3D models from online videos
 
 ## Core Requirements
 - Multi-image upload for 3D reconstruction
-- YouTube video frame extraction at 6 FPS
-- Direct video file upload support
+- Video frame extraction at 6 FPS
+- Generic web video URL support (Vimeo, Twitter, direct links, etc.)
+- YouTube video support
 - Architecture/landscape classification (filter out people/vehicles)
 - Interactive 3D Gaussian Splat viewer
+- Camera path recording with playback and export
 - Export to PLY, GLTF, OBJ formats
-- WebNN/WebGPU for on-device acceleration
 
 ## What's Been Implemented (Jan 30, 2026)
 
@@ -24,36 +25,42 @@ Create an app that makes a 3D model from multiple pictures using Gaussian Splatt
 - [x] Project management CRUD APIs
 - [x] Multi-image upload with classification filtering
 - [x] YouTube video URL processing (yt-dlp)
+- [x] Generic web video URL endpoint (supports 1000+ sites)
 - [x] Direct video file upload endpoint
-- [x] Frame extraction at configurable FPS
-- [x] OpenCV-based frame classification:
-  - Edge detection for architectural features
-  - Haar cascade face detection
-  - Color analysis (sky, green areas, skin tones)
-  - Line detection for building structures
+- [x] Frame extraction at 6 FPS
+- [x] OpenCV-based frame classification
 - [x] Processing job simulation
 - [x] Model export (PLY, GLTF, OBJ)
-- [x] WebNN/WebGPU capability detection endpoint
 
 ### Frontend (React + Tailwind + Shadcn)
 - [x] Ktheme Obsidian Crimson design system
 - [x] Drag & drop image uploader
-- [x] YouTube URL input dialog (multiple URLs)
-- [x] Direct video upload dialog
+- [x] Three video input options: File | URL | YouTube
+- [x] Web video URL dialog (multi-URL support)
 - [x] Interactive 3D canvas viewer
+- [x] **Camera path recording** - records camera positions during viewing
+- [x] **Camera path visualization** - shows path with start/end markers
+- [x] **Camera path playback** - replay recorded camera movements
+- [x] **Camera path export** - download as JSON file
 - [x] Processing progress visualization
-- [x] NPU/WebGPU status widget
-- [x] Settings panel (quality, resolution, iterations, SH degree)
-- [x] Export controls for multiple formats
-- [x] YouTube job status display
+- [x] Settings panel (quality, resolution, iterations)
+- [x] Export controls
+
+### Camera Path Feature Details
+- Records camera position (rotation X/Y + zoom) every 100ms
+- Visualizes path with copper-colored dashed line
+- Green dot = start, Red dot = end
+- Numbered keyframe markers
+- Playback replays exact camera movements
+- Export to JSON with frame data
 
 ## Architecture
 ```
 Frontend (React) <-> Backend (FastAPI) <-> MongoDB
      |                    |
      v                    v
-  WebGPU/WebNN       OpenCV + yt-dlp
-  (3D rendering)    (frame extraction)
+  Canvas 2D           OpenCV + yt-dlp
+  (3D viewer)        (frame extraction)
 ```
 
 ## Prioritized Backlog
@@ -64,22 +71,16 @@ Frontend (React) <-> Backend (FastAPI) <-> MongoDB
 
 ### P1 (High)
 - [ ] Image preview thumbnails
-- [ ] Multiple project management
-- [ ] Better frame quality selection
+- [ ] Video rendering from camera path
+- [ ] Better ML model for classification
 
 ### P2 (Nice to have)
 - [ ] 3D model editing tools
-- [ ] Camera path export
 - [ ] VR/AR viewing mode
-- [ ] Real-time collaborative editing
-
-## Next Tasks
-1. Implement actual Gaussian Splatting processing pipeline
-2. Add image thumbnail previews in the grid
-3. Integrate real ML model for NPU-based classification
-4. Add camera controls tutorial overlay
+- [ ] Collaborative editing
 
 ## Technical Notes
-- YouTube downloads may be blocked by anti-bot measures; direct video upload recommended
-- Classification uses OpenCV heuristics (not ML) for fast on-device processing
-- 3D viewer uses Canvas 2D API; could upgrade to WebGPU for better performance
+- Gaussian Splatting processing is MOCKED (simulated)
+- Classification uses OpenCV heuristics, not ML
+- yt-dlp supports 1000+ video sites (YouTube, Vimeo, Twitter, etc.)
+- Camera path stored in component state (could persist to backend)
