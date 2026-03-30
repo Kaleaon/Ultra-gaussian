@@ -1,0 +1,108 @@
+{
+  "project_overview": {
+    "domain": "3D Model Generation",
+    "theme": "dark",
+    "archetype": "Archetype 5 (Jewel & Luxury) mixed with Archetype 4 (Swiss/High-Contrast)",
+    "mood": "Cinematic, bold, highly technical, high-performance",
+    "background_context": "Gaussian Splatting dashboard with on-device NPU/TPU acceleration via WebNN and WebGPU viewer."
+  },
+  "color_system": {
+    "primary": "#DC143C",
+    "on_primary": "#0A0A0A",
+    "background": "#0A0A0A",
+    "on_background": "#F5F5F5",
+    "surface": "#141414",
+    "on_surface": "#F5F5F5",
+    "secondary": "#262626",
+    "tertiary": "#A8505A",
+    "surface_variant": "#2D2D2D",
+    "outline": "#8A8A8A",
+    "copper_effects": {
+      "base": "#B87333",
+      "highlight": "#E8B4A0",
+      "shadow": "#6B3410",
+      "shimmer": "#F2D2B0"
+    },
+    "gradients": {
+      "processing_beam": "linear-gradient(90deg, transparent, #B87333, #E8B4A0, #B87333, transparent)"
+    },
+    "rules": [
+      "Use #0A0A0A pure obsidian for the base app background to make the 3D elements pop.",
+      "Use surface #141414 for control panels with 1px outline #2D2D2D.",
+      "Primary #DC143C is ONLY for primary actions (e.g., 'Start Processing', 'Export').",
+      "Copper effects are reserved for data/processing states (progress bars, active states, NPU active)."
+    ]
+  },
+  "typography": {
+    "heading_font": "Clash Display",
+    "body_font": "JetBrains Mono",
+    "scale": {
+      "h1": "text-4xl sm:text-5xl lg:text-6xl tracking-tighter font-medium",
+      "h2": "text-2xl sm:text-3xl lg:text-4xl tracking-tight font-medium",
+      "h3": "text-xl sm:text-2xl tracking-tight font-medium",
+      "body": "text-sm sm:text-base leading-relaxed font-light",
+      "labels": "text-xs tracking-[0.2em] uppercase text-[#8A8A8A]"
+    }
+  },
+  "spacing_and_layout": {
+    "strategy": "The 'Control Room' Grid",
+    "grid_structure": "Dense, highly structured panels. Main viewer takes col-span-2 or col-span-3. Left/right panels for settings and uploads take col-span-1.",
+    "spacing_scale": "p-4, p-6 for panels. gap-4 or gap-6 for dashboard items.",
+    "alignment": "Strict left alignment for data and settings. Central alignment for the viewer canvas."
+  },
+  "surface_strategies": {
+    "panels": "Flat solid background (#141414) with crisp 1px borders (#2D2D2D), no heavy drop shadows, mimicking a technical command center.",
+    "floating_controls": "Glassmorphism (bg-[#141414]/70, backdrop-blur-xl, border-[#2D2D2D]) inside the 3D viewer.",
+    "active_processing": "Tracing Beam effect using the copper gradient to surround the processing panel or NPU status."
+  },
+  "components_instructions": {
+    "uploader": {
+      "type": "custom",
+      "design": "Large dashed border using #8A8A8A, turning to #B87333 on drag over. Dark background #0A0A0A. Prominent 'Drag & Drop' typography.",
+      "data_testid": "image-upload-zone"
+    },
+    "npu_status_widget": {
+      "type": "shadcn_card",
+      "design": "Small tech-focused card. Use green/copper dots for 'Active' status. Mono font for metrics.",
+      "data_testid": "npu-status-card"
+    },
+    "processing_pipeline": {
+      "type": "shadcn_progress",
+      "design": "Linear progress bar using copper base (#B87333) with shimmer animation during processing.",
+      "data_testid": "processing-progress-bar"
+    },
+    "viewer_3d": {
+      "type": "custom_container",
+      "design": "Massive central area. Black background. Has floating action buttons on bottom/top corners for reset camera, toggle wireframe, etc.",
+      "data_testid": "webgpu-viewer-canvas"
+    },
+    "export_controls": {
+      "type": "shadcn_buttons",
+      "design": "Secondary styling (#262626 bg, #F5F5F5 text) with crisp borders.",
+      "data_testid_prefix": "export-btn-"
+    }
+  },
+  "animation_and_motion": {
+    "hover_states": "Crisp transition: background lightens slightly, border changes to copper (#B87333) or crimson (#DC143C).",
+    "processing_state": "Pulsing/shimmering copper gradients to indicate NPU workload.",
+    "transitions": "Fast and snappy (0.2s) - no bouncy physics. This is a pro tool."
+  },
+  "icons_and_assets": {
+    "library": "lucide-react",
+    "usage": "Use technical, sharp icons. (e.g., Cpu, UploadCloud, Box, Download, Settings, Activity)"
+  },
+  "media": {
+    "viewer_placeholder_bg": {
+      "url": "https://images.unsplash.com/photo-1748723594319-142e211b46a9?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA2MjJ8MHwxfHNlYXJjaHwxfHwzZCUyMHBvaW50JTIwY2xvdWQlMjBhYnN0cmFjdCUyMGRhcmt8ZW58MHx8fHwxNzc0ODg0MTgzfDA&ixlib=rb-4.1.0&q=85",
+      "description": "Abstract ethereal cloud to use as an empty state background inside the 3D Viewer."
+    },
+    "copper_texture_accent": {
+      "url": "https://images.pexels.com/photos/12515072/pexels-photo-12515072.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "description": "Subtle concentric copper spirals texture. Can be used as a mask or very low opacity background for the NPU processing card."
+    }
+  },
+  "accessibility_and_testing": {
+    "contrast": "Ensure pure white (#F5F5F5) is used on pure black (#0A0A0A) for maximum APCA contrast.",
+    "testing": "All interactive elements MUST have explicit data-testid attributes."
+  }
+}
