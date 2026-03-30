@@ -124,132 +124,163 @@ class VideoExtractionJob(BaseModel):
     completed_at: Optional[str] = None
     error_message: Optional[str] = None
 
-# === CLASSIFICATION HELPERS ===
+# === PERSON MASKING & CLASSIFICATION ===
 
-# Simple keyword-based classification for architecture/landscape detection
-# This runs fast and can be enhanced with actual ML models later
-ARCHITECTURE_KEYWORDS = [
-    'building', 'house', 'tower', 'bridge', 'church', 'castle', 'monument',
-    'skyscraper', 'temple', 'palace', 'cathedral', 'dome', 'arch', 'column',
-    'facade', 'roof', 'window', 'door', 'wall', 'staircase', 'balcony'
-]
+# MediaPipe-based person segmentation for inpainting
+_selfie_segmenter = None
 
-LANDSCAPE_KEYWORDS = [
-    'mountain', 'valley', 'river', 'lake', 'forest', 'field', 'meadow',
-    'cliff', 'canyon', 'beach', 'ocean', 'desert', 'hill', 'rock',
-    'garden', 'park', 'tree', 'grass', 'sky', 'horizon'
-]
+def get_selfie_segmenter():
+    """Lazy-init MediaPipe SelfieSegmentation (lightweight, CPU-based)."""
+    global _selfie_segmenter
+    if _selfie_segmenter is None:
+        try:
+            import mediapipe as mp
+            _selfie_segmenter = mp.solutions.selfie_segmentation.SelfieSegmentation(model_selection=1)
+            logging.info("MediaPipe SelfieSegmentation initialized")
+        except Exception as e:
+            logging.warning(f"MediaPipe init failed: {e}")
+    return _selfie_segmenter
 
-FILTER_KEYWORDS = [
-    'person', 'people', 'face', 'human', 'man', 'woman', 'child', 'crowd',
-    'car', 'vehicle', 'truck', 'bus', 'motorcycle', 'bicycle', 'traffic',
-    'selfie', 'portrait', 'group'
-]
 
-def classify_frame_simple(frame_path: str) -> dict:
+def mask_people_in_frame(frame_path: str) -> dict:
     """
-    Simple frame classification based on image analysis.
-    Returns classification result with confidence.
-    
-    In production, this would use a lightweight MobileNet or similar model
-    that can run on NPU/TPU via ONNX Runtime with WebNN backend.
+    Detect people in frame using MediaPipe SelfieSegmentation.
+    Instead of discarding the frame, inpaint over detected person regions
+    so architecture/landscape content is preserved.
+
+    Returns:
+        dict with keys: had_people (bool), person_coverage (float 0-1),
+              masked_path (str - path to inpainted image, same as input if no people)
     """
     import cv2
     import numpy as np
-    
+
+    img = cv2.imread(frame_path)
+    if img is None:
+        return {"had_people": False, "person_coverage": 0.0, "masked_path": frame_path}
+
+    segmenter = get_selfie_segmenter()
+    if segmenter is None:
+        # Fallback: no masking available, keep frame as-is
+        return {"had_people": False, "person_coverage": 0.0, "masked_path": frame_path}
+
+    height, width = img.shape[:2]
+    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    results = segmenter.process(img_rgb)
+    mask = results.segmentation_mask  # float [0,1], person=high
+
+    # Threshold to binary mask
+    person_mask = (mask > 0.5).astype(np.uint8) * 255
+    person_coverage = np.sum(person_mask > 0) / (height * width)
+
+    if person_coverage < 0.01:
+        # Negligible person pixels, keep original
+        return {"had_people": False, "person_coverage": float(person_coverage), "masked_path": frame_path}
+
+    if person_coverage > 0.85:
+        # Frame is almost entirely a person (selfie etc.) - discard
+        return {"had_people": True, "person_coverage": float(person_coverage), "masked_path": None}
+
+    # Dilate mask slightly for cleaner inpainting edges
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
+    person_mask_dilated = cv2.dilate(person_mask, kernel, iterations=1)
+
+    # Inpaint over person regions using Navier-Stokes (better edge preservation)
+    inpainted = cv2.inpaint(img, person_mask_dilated, inpaintRadius=7, flags=cv2.INPAINT_NS)
+    cv2.imwrite(frame_path, inpainted)
+
+    logging.info(f"Masked people in {frame_path} (coverage: {person_coverage:.1%})")
+    return {"had_people": True, "person_coverage": float(person_coverage), "masked_path": frame_path}
+
+
+def classify_frame(frame_path: str) -> dict:
+    """
+    Classify a frame for architecture/landscape content.
+    If people are detected, they are inpainted out (masked) rather than
+    the frame being discarded entirely.
+    """
+    import cv2
+    import numpy as np
+
     try:
+        # Step 1: Mask out any people in the frame
+        mask_result = mask_people_in_frame(frame_path)
+
+        if mask_result["masked_path"] is None:
+            # Frame was >85% person (e.g. selfie) - discard
+            return {
+                "classification": "filtered",
+                "confidence": 0.9,
+                "reason": f"Frame is {mask_result['person_coverage']:.0%} person (selfie/portrait)",
+                "people_masked": True,
+                "person_coverage": mask_result["person_coverage"],
+            }
+
+        # Step 2: Classify the (possibly inpainted) image
         img = cv2.imread(frame_path)
         if img is None:
             return {"classification": "error", "confidence": 0.0, "reason": "Cannot read image"}
-        
-        # Convert to different color spaces for analysis
+
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        
-        # Calculate various features
         height, width = img.shape[:2]
-        
+
         # Edge detection for architectural features
         edges = cv2.Canny(gray, 50, 150)
         edge_density = np.sum(edges > 0) / (height * width)
-        
+
         # Line detection for buildings
-        lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=50, minLineLength=50, maxLineGap=10)
+        lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=50, minLineLength=50, maxLineGap=10)
         line_count = len(lines) if lines is not None else 0
-        
-        # Color analysis
-        avg_saturation = np.mean(hsv[:, :, 1])
-        avg_value = np.mean(hsv[:, :, 2])
-        
-        # Sky detection (upper portion of image)
-        upper_third = img[:height//3, :, :]
+
+        # Sky detection (upper portion)
+        upper_third = img[: height // 3, :, :]
         upper_hsv = cv2.cvtColor(upper_third, cv2.COLOR_BGR2HSV)
         blue_mask = cv2.inRange(upper_hsv, np.array([100, 50, 50]), np.array([130, 255, 255]))
-        sky_percentage = np.sum(blue_mask > 0) / (height//3 * width)
-        
+        sky_percentage = np.sum(blue_mask > 0) / (height // 3 * width)
+
         # Green detection for landscapes
         green_mask = cv2.inRange(hsv, np.array([35, 40, 40]), np.array([85, 255, 255]))
         green_percentage = np.sum(green_mask > 0) / (height * width)
-        
-        # Skin tone detection for people filtering
-        skin_lower = np.array([0, 20, 70], dtype=np.uint8)
-        skin_upper = np.array([20, 255, 255], dtype=np.uint8)
-        skin_mask = cv2.inRange(hsv, skin_lower, skin_upper)
-        skin_percentage = np.sum(skin_mask > 0) / (height * width)
-        
-        # Face detection using Haar cascades
-        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-        faces = face_cascade.detectMultiScale(gray, 1.1, 4)
-        has_faces = len(faces) > 0
-        
-        # Decision logic
-        # Filter out images with people
-        if has_faces or skin_percentage > 0.15:
-            return {
-                "classification": "filtered",
-                "confidence": 0.85,
-                "reason": "Contains people/faces",
-                "features": {"faces": len(faces), "skin_pct": round(skin_percentage, 3)}
-            }
-        
-        # Architecture detection: high edge density + many lines + less green
+
+        # Architecture score
         architecture_score = (
-            (edge_density * 2) +
-            (min(line_count / 100, 1.0)) +
-            (1 - green_percentage) * 0.5 +
-            (sky_percentage * 0.3)
+            (edge_density * 2) + (min(line_count / 100, 1.0)) + (1 - green_percentage) * 0.5 + (sky_percentage * 0.3)
         ) / 3
-        
-        # Landscape detection: sky presence + green areas + lower edge density
-        landscape_score = (
-            (sky_percentage * 1.5) +
-            (green_percentage * 1.5) +
-            (1 - edge_density) * 0.5
-        ) / 3
-        
+
+        # Landscape score
+        landscape_score = ((sky_percentage * 1.5) + (green_percentage * 1.5) + (1 - edge_density) * 0.5) / 3
+
+        base = {
+            "people_masked": mask_result["had_people"],
+            "person_coverage": mask_result["person_coverage"],
+        }
+
         if architecture_score > 0.4 and architecture_score > landscape_score:
             return {
+                **base,
                 "classification": "architecture",
                 "confidence": min(architecture_score, 0.95),
                 "reason": "Detected architectural features",
-                "features": {"edges": round(edge_density, 3), "lines": line_count}
+                "features": {"edges": round(edge_density, 3), "lines": line_count},
             }
         elif landscape_score > 0.3:
             return {
+                **base,
                 "classification": "landscape",
                 "confidence": min(landscape_score, 0.95),
                 "reason": "Detected landscape features",
-                "features": {"sky_pct": round(sky_percentage, 3), "green_pct": round(green_percentage, 3)}
+                "features": {"sky_pct": round(sky_percentage, 3), "green_pct": round(green_percentage, 3)},
             }
         else:
-            # Accept as generic scene if not clearly people/vehicles
             return {
+                **base,
                 "classification": "scene",
                 "confidence": 0.5,
-                "reason": "General scene - architecture/landscape unclear",
-                "features": {"arch_score": round(architecture_score, 3), "land_score": round(landscape_score, 3)}
+                "reason": "General scene",
+                "features": {"arch_score": round(architecture_score, 3), "land_score": round(landscape_score, 3)},
             }
-            
+
     except Exception as e:
         return {"classification": "error", "confidence": 0.0, "reason": str(e)}
 
@@ -368,27 +399,32 @@ async def extract_frames_from_video(job_id: str, project_id: str, video_path: st
         
         cap.release()
         
-        # Update status for classification
+        # Update status for classification + person masking
         await db.video_jobs.update_one(
             {"id": job_id},
             {"$set": {
                 "status": "classifying",
-                "current_step": "Classifying frames (filtering people/vehicles)...",
+                "current_step": "Classifying frames & masking people...",
                 "progress": 60,
                 "frames_extracted": extracted_count
             }}
         )
         
-        # Classify frames
+        # Classify frames (people are masked/inpainted, not discarded)
         frame_files = sorted(frames_dir.glob("*.jpg"))
+        masked_count = 0
         for i, frame_file in enumerate(frame_files):
-            result = classify_frame_simple(str(frame_file))
+            result = classify_frame(str(frame_file))
             
-            if result["classification"] in ["architecture", "landscape", "scene"]:
+            if result["classification"] not in ["filtered", "error"]:
+                people_masked = result.get("people_masked", False)
+                if people_masked:
+                    masked_count += 1
                 accepted_frames.append({
                     "path": str(frame_file),
                     "classification": result["classification"],
-                    "confidence": result["confidence"]
+                    "confidence": result["confidence"],
+                    "people_masked": people_masked,
                 })
                 
                 image_record = ImageUpload(
@@ -405,13 +441,16 @@ async def extract_frames_from_video(job_id: str, project_id: str, video_path: st
             
             if (i + 1) % 10 == 0:
                 progress = 60 + ((i + 1) / max(extracted_count, 1)) * 35
+                step_detail = f"Classified {i + 1}/{extracted_count} frames"
+                if masked_count:
+                    step_detail += f" ({masked_count} people masked)"
                 await db.video_jobs.update_one(
                     {"id": job_id},
                     {"$set": {
                         "progress": progress,
                         "frames_accepted": len(accepted_frames),
                         "frames_rejected": rejected_count,
-                        "current_step": f"Classified {i + 1}/{extracted_count} frames..."
+                        "current_step": step_detail
                     }}
                 )
         
@@ -438,7 +477,7 @@ async def extract_frames_from_video(job_id: str, project_id: str, video_path: st
             {"$set": {
                 "status": "completed",
                 "progress": 100,
-                "current_step": "Complete",
+                "current_step": f"Complete ({masked_count} frames had people masked)" if masked_count else "Complete",
                 "frames_accepted": len(accepted_frames),
                 "frames_rejected": rejected_count,
                 "completed_at": datetime.now(timezone.utc).isoformat()
@@ -531,11 +570,11 @@ async def upload_images(project_id: str, files: List[UploadFile] = File(...)):
         with open(file_path, "wb") as f:
             f.write(content)
         
-        # Classify uploaded image
-        classification_result = classify_frame_simple(str(file_path))
+        # Classify uploaded image (masks people instead of discarding)
+        classification_result = classify_frame(str(file_path))
         
-        # Only accept architecture/landscape/scene images
-        if classification_result["classification"] in ["architecture", "landscape", "scene"]:
+        # Only discard if >85% person (selfie) or error
+        if classification_result["classification"] not in ["filtered", "error"]:
             # Generate thumbnail
             thumbnail_data = generate_thumbnail(str(file_path))
             thumbnail_path = None
@@ -999,6 +1038,110 @@ def generate_demo_gltf():
         "bufferViews": [],
         "buffers": []
     }, indent=2)
+
+def generate_off_mesh(model_path=None):
+    """Generate OFF mesh content, optionally from a trained model."""
+    import random
+    import math
+    
+    if model_path and Path(model_path).exists():
+        with open(model_path) as f:
+            data = json.load(f)
+            splats = data.get("splats", [])
+            if splats:
+                lines = ["COFF\n"]
+                num_tris = len(splats)
+                lines.append(f"{num_tris * 3} {num_tris} 0\n")
+                for s in splats:
+                    pos = s["position"]
+                    scale = s.get("scale", [0.01, 0.01, 0.01])
+                    size = sum(scale) / len(scale) * 2
+                    for k in range(3):
+                        angle = k * 2 * math.pi / 3
+                        vx = pos[0] + size * math.cos(angle)
+                        vy = pos[1] + size * math.sin(angle)
+                        vz = pos[2]
+                        lines.append(f"{vx} {vy} {vz}\n")
+                for i, s in enumerate(splats):
+                    c = s.get("color", [128, 128, 128])
+                    a = int(s.get("opacity", 0.8) * 255)
+                    base = i * 3
+                    lines.append(f"3 {base} {base+1} {base+2} {c[0]} {c[1]} {c[2]} {a}\n")
+                return "".join(lines)
+    
+    # Generate demo OFF mesh
+    num_triangles = 200
+    lines = ["COFF\n"]
+    lines.append(f"{num_triangles * 3} {num_triangles} 0\n")
+    for i in range(num_triangles):
+        theta = random.uniform(0, 2 * math.pi)
+        phi = random.uniform(0, math.pi)
+        r = 0.8 + random.gauss(0, 0.15)
+        cx = r * math.sin(phi) * math.cos(theta)
+        cy = r * math.sin(phi) * math.sin(theta)
+        cz = r * math.cos(phi)
+        size = 0.03 + random.uniform(0, 0.04)
+        for k in range(3):
+            angle = k * 2 * math.pi / 3 + random.uniform(0, 0.3)
+            vx = cx + size * math.cos(angle)
+            vy = cy + size * math.sin(angle)
+            vz = cz
+            lines.append(f"{vx} {vy} {vz}\n")
+    for i in range(num_triangles):
+        cr = int(128 + 127 * math.sin(i * 0.1))
+        cg = int(128 + 127 * math.cos(i * 0.15))
+        cb = int(128 + 127 * math.sin(i * 0.2 + 1))
+        base = i * 3
+        lines.append(f"3 {base} {base+1} {base+2} {cr} {cg} {cb} 200\n")
+    return "".join(lines)
+
+def generate_demo_triangles():
+    """Generate demo triangle data for mesh preview."""
+    import random
+    import math
+    
+    triangles = []
+    num_triangles = 300
+    for i in range(num_triangles):
+        theta = random.uniform(0, 2 * math.pi)
+        phi = random.uniform(0, math.pi)
+        r = 0.8 + random.gauss(0, 0.15)
+        cx = r * math.sin(phi) * math.cos(theta)
+        cy = r * math.sin(phi) * math.sin(theta)
+        cz = r * math.cos(phi)
+        size = 0.02 + random.uniform(0, 0.03)
+        verts = []
+        for k in range(3):
+            angle = k * 2 * math.pi / 3
+            verts.append([cx + size * math.cos(angle), cy + size * math.sin(angle), cz + random.gauss(0, 0.005)])
+        triangles.append({
+            "vertices": verts,
+            "color": [int(128 + 127 * math.sin(theta)), int(128 + 127 * math.cos(phi)), int(128 + 127 * math.sin(theta + phi))],
+            "opacity": random.uniform(0.6, 1.0),
+        })
+    return triangles
+
+def convert_splats_to_triangles(splats):
+    """Convert splat dicts to triangle dicts for mesh preview."""
+    import math
+    
+    triangles = []
+    for s in splats:
+        pos = s["position"]
+        scale = s.get("scale", [0.01, 0.01, 0.01])
+        color = s.get("color", [128, 128, 128])
+        opacity = s.get("opacity", 0.8)
+        size = sum(scale) / len(scale) * 2
+        verts = []
+        for k in range(3):
+            angle = k * 2 * math.pi / 3
+            verts.append([pos[0] + size * math.cos(angle), pos[1] + size * math.sin(angle), pos[2]])
+        triangles.append({
+            "vertices": verts,
+            "color": color,
+            "opacity": opacity,
+        })
+    return triangles
 
 # Include the router
 app.include_router(api_router)
