@@ -53,6 +53,7 @@ export default function Dashboard() {
         if (response.data.status === "completed") {
           toast.success("3D Model generation complete!");
           fetchModelData();
+          fetchMeshData();
         } else if (response.data.status === "failed") {
           toast.error("Processing failed: " + response.data.error_message);
         }
@@ -116,6 +117,7 @@ export default function Dashboard() {
           setProcessingStatus(statusResponse.data);
           if (statusResponse.data.status === "completed") {
             fetchModelData(latestProject.id);
+            fetchMeshData(latestProject.id);
           }
         }
       } else {
@@ -236,6 +238,18 @@ export default function Dashboard() {
       setModelData(response.data);
     } catch (error) {
       console.error("Error fetching model:", error);
+    }
+  };
+
+  const fetchMeshData = async (projectId) => {
+    const id = projectId || project?.id;
+    if (!id) return;
+
+    try {
+      const response = await axios.get(`${API}/projects/${id}/mesh`);
+      setMeshData(response.data);
+    } catch (error) {
+      console.error("Error fetching mesh:", error);
     }
   };
 
@@ -436,6 +450,23 @@ export default function Dashboard() {
               </>
             )}
           </div>
+
+          {/* Load Demo Preview */}
+          {!isProcessing && !modelData && !meshData && project && (
+            <button
+              className="absolute bottom-16 left-1/2 -translate-x-1/2 px-4 py-2 bg-[var(--surface)]/80 backdrop-blur-sm border border-[var(--surface-variant)] rounded-lg text-xs text-[var(--copper-base)] hover:bg-[var(--surface)] transition-colors"
+              onClick={() => {
+                if (settings.renderer === "triangle") {
+                  fetchMeshData(project.id);
+                } else {
+                  fetchModelData(project.id);
+                }
+              }}
+              data-testid="load-preview-btn"
+            >
+              Load Demo Preview
+            </button>
+          )}
         </div>
 
         {/* Right Panel - Settings & Export */}

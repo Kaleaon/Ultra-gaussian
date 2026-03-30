@@ -319,7 +319,6 @@ async def download_and_extract_youtube(job_id: str, project_id: str, video_url: 
         # Download video
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(video_url, download=True)
-            video_title = info.get('title', 'Unknown')
         
         # Find downloaded video file
         video_files = list(video_dir.glob('video.*'))
@@ -680,7 +679,7 @@ async def upload_video(project_id: str, file: UploadFile = File(...), fps: int =
     # Validate file type
     allowed_types = ["video/mp4", "video/webm", "video/quicktime", "video/x-msvideo", "video/mpeg"]
     if file.content_type not in allowed_types:
-        raise HTTPException(status_code=400, detail=f"Invalid file type. Allowed: MP4, WebM, MOV, AVI, MPEG")
+        raise HTTPException(status_code=400, detail="Invalid file type. Allowed: MP4, WebM, MOV, AVI, MPEG")
     
     # Save video file
     job_id = str(uuid.uuid4())

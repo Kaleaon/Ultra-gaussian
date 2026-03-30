@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from "react";
-import { Cpu, Activity, Zap, AlertTriangle, Smartphone } from "lucide-react";
+import { Cpu, Activity, Zap, AlertTriangle, Smartphone, ChevronDown, ChevronUp } from "lucide-react";
 import { detectDeviceCapabilities } from "@/utils/webnnClassifier";
 
 export default function NPUStatusWidget({ capabilities, isProcessing }) {
   const [deviceInfo, setDeviceInfo] = useState(null);
   const [isDetecting, setIsDetecting] = useState(true);
+  const [showGuide, setShowGuide] = useState(false);
 
   useEffect(() => {
     async function detect() {
@@ -132,6 +133,39 @@ export default function NPUStatusWidget({ capabilities, isProcessing }) {
           <span>
             No hardware acceleration detected. Processing will use CPU (slower).
           </span>
+        </div>
+      )}
+
+      {/* Pixel TPU Setup Guide Toggle */}
+      <button
+        onClick={() => setShowGuide(!showGuide)}
+        className="w-full flex items-center justify-between mt-4 p-2 bg-[var(--surface-variant)]/50 hover:bg-[var(--surface-variant)] rounded text-[0.65rem] text-[var(--outline)] transition-colors"
+        data-testid="tpu-guide-toggle"
+      >
+        <span>Pixel TPU Setup Guide</span>
+        {showGuide ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+      </button>
+
+      {showGuide && (
+        <div className="mt-2 p-3 bg-[var(--secondary)] rounded-lg text-[0.6rem] text-[var(--outline)] space-y-2" data-testid="tpu-guide-content">
+          <p className="text-[var(--copper-base)] font-semibold text-[0.65rem]">Google Pixel TPU Testing</p>
+          <div className="space-y-1.5">
+            <p><span className="text-[var(--on-surface)]">1.</span> Open Chrome on your Pixel device (6 or newer)</p>
+            <p><span className="text-[var(--on-surface)]">2.</span> Navigate to <code className="bg-[var(--surface-variant)] px-1 rounded">chrome://flags</code></p>
+            <p><span className="text-[var(--on-surface)]">3.</span> Search for <code className="bg-[var(--surface-variant)] px-1 rounded">WebNN API</code></p>
+            <p><span className="text-[var(--on-surface)]">4.</span> Set to <span className="text-green-400">Enabled</span> and restart Chrome</p>
+            <p><span className="text-[var(--on-surface)]">5.</span> Visit this app &mdash; the widget above will show <span className="text-green-400">TPU</span></p>
+          </div>
+          <hr className="border-[var(--surface-variant)]" />
+          <p className="text-[var(--outline)]">
+            The Tensor chip TPU is accessed via Android NNAPI &rarr; LiteRT &rarr; WebNN.
+            Image classification runs MobileNetV2 (ONNX) locally on your device &mdash; no server round-trip.
+            People in frames are automatically masked out (inpainted) instead of discarded.
+          </p>
+          <div className="mt-1">
+            <p className="text-[var(--copper-base)]">Supported Pixels:</p>
+            <p>Pixel 6/6a/7/7a/8/8a/9 (Tensor G1&ndash;G5)</p>
+          </div>
         </div>
       )}
     </div>
