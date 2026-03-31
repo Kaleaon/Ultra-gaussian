@@ -1,0 +1,1 @@
+{"format": "gaussian_splat", "version": "2.0", "num_splats": 1, "splats": [{"position": [0.058960536198287165, 0.06177683009055023, 0.0026387506464091268], "scale": [0.02040350428537081, 0.02040350428537081, 0.02040350428537081], "rotation": [1.0, 0.0, 0.0, 0.0], "color": [73, 73, 172], "opacity": 0.9243841142311846}], "training": "differentiable_rendering"}
