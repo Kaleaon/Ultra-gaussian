@@ -1,6 +1,5 @@
 import React from "react";
 import { Download, FileBox, FileCode, File, Layers } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import {
   Tooltip,
   TooltipContent,
@@ -8,7 +7,12 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
-export default function ExportPanel({ onExport, disabled, renderer = "gaussian" }) {
+export default function ExportPanel({
+  onExport,
+  disabled,
+  renderer = "gaussian",
+  disabledMessage = "Run processing before export.",
+}) {
   const gaussianFormats = [
     {
       id: "ply",
@@ -65,7 +69,7 @@ export default function ExportPanel({ onExport, disabled, renderer = "gaussian" 
       <div className="panel-content">
         {disabled && (
           <p className="text-xs text-[var(--outline)] mb-4">
-            Complete processing to enable export options
+            {disabledMessage}
           </p>
         )}
 

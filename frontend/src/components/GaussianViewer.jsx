@@ -9,6 +9,15 @@ import {
 import { Button } from "@/components/ui/button";
 
 export default function GaussianViewer({ modelData, isProcessing, processingStatus, isDemo = false }) {
+const MODEL_FETCH_STATES = {
+  IDLE: "idle",
+  PROCESSING: "processing",
+  NOT_READY: "not_ready",
+  READY: "ready",
+  ERROR: "error",
+};
+
+export default function GaussianViewer({ modelData, isProcessing, processingStatus, modelFetchState = MODEL_FETCH_STATES.IDLE }) {
   const canvasRef = useRef(null);
   const [rotation, setRotation] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
@@ -152,12 +161,6 @@ export default function GaussianViewer({ modelData, isProcessing, processingStat
           ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
           ctx.fill();
         });
-      } else if (!isProcessing) {
-        // Draw placeholder
-        ctx.fillStyle = "#1a1a1a";
-        ctx.font = "14px JetBrains Mono";
-        ctx.textAlign = "center";
-        ctx.fillText("Upload images to generate 3D model", centerX, centerY);
       }
 
       animationRef.current = requestAnimationFrame(render);
@@ -314,6 +317,7 @@ export default function GaussianViewer({ modelData, isProcessing, processingStat
       {isProcessing && (
         <div className="processing-overlay">
           <div className="processing-spinner mb-4" />
+          <p className="text-base text-[var(--on-surface)] mb-1">Processing in Progress</p>
           <p className="text-sm text-[var(--on-surface)] mb-2">
             {processingStatus?.current_step || "Processing..."}
           </p>
@@ -323,16 +327,26 @@ export default function GaussianViewer({ modelData, isProcessing, processingStat
         </div>
       )}
 
-      {/* Empty State */}
-      {!modelData && !isProcessing && (
+      {/* Model State */}
+      {!modelData && !isProcessing && modelFetchState !== MODEL_FETCH_STATES.READY && (
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
           <Box className="w-16 h-16 text-[var(--surface-variant)] mb-4" />
           <p className="text-lg font-medium text-[var(--on-surface)] mb-2">
-            No Model Loaded
+            {modelFetchState === MODEL_FETCH_STATES.PROCESSING ? "Processing in Progress" : "No Model Yet"}
           </p>
           <p className="text-sm text-[var(--outline)]">
-            Upload images and start processing
+            {modelFetchState === MODEL_FETCH_STATES.PROCESSING
+              ? "Please wait while your reconstruction completes"
+              : modelFetchState === MODEL_FETCH_STATES.ERROR
+                ? "Unable to load model data"
+                : "Upload images and start processing"}
           </p>
+        </div>
+      )}
+
+      {modelData && modelFetchState === MODEL_FETCH_STATES.READY && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 glass-panel px-3 py-1.5 rounded-lg pointer-events-none">
+          <p className="text-xs text-[var(--copper-base)]">Model Ready</p>
         </div>
       )}
 
