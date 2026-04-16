@@ -355,7 +355,9 @@ async def download_and_extract_youtube(job_id: str, project_id: str, video_url: 
         video_dir.mkdir(exist_ok=True)
         
         ydl_opts = {
-            'format': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]',
+            # Prefer pre-merged progressive streams to avoid requiring ffmpeg for muxing.
+            # Keep a fallback chain for providers/manifests that expose different formats.
+            'format': 'best[height<=1080]/best/bestvideo[height<=1080]+bestaudio',
             'outtmpl': str(video_dir / 'video.%(ext)s'),
             'quiet': True,
             'no_warnings': True,
