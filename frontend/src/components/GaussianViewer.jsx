@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 
+export default function GaussianViewer({ modelData, isProcessing, processingStatus, isDemo = false }) {
 const MODEL_FETCH_STATES = {
   IDLE: "idle",
   PROCESSING: "processing",
@@ -296,6 +297,12 @@ export default function GaussianViewer({ modelData, isProcessing, processingStat
 
   return (
     <div className="viewer-canvas-container" data-testid="webgpu-viewer-canvas">
+      {isDemo && (
+        <div className="absolute left-4 right-4 top-4 z-20 rounded-lg border border-amber-500/60 bg-amber-950/85 px-4 py-2 text-sm text-amber-100 shadow-lg backdrop-blur-sm">
+          Preview data shown. Start processing to generate your real model.
+        </div>
+      )}
+
       <canvas
         ref={canvasRef}
         className="viewer-canvas cursor-grab active:cursor-grabbing"

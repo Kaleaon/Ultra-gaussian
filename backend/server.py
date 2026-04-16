@@ -932,11 +932,12 @@ async def get_model(project_id: str):
                 "num_splats": model_data.get("num_splats", len(model_data.get("splats", []))),
                 "data": model_data.get("splats", []),
                 "project_id": project_id,
+                "is_demo": False,
             }
     
     # Fallback to demo data
     demo_splat_data = generate_demo_splat_data()
-    return {"format": "splat", "data": demo_splat_data, "project_id": project_id}
+    return {"format": "splat", "data": demo_splat_data, "project_id": project_id, "is_demo": True}
 
 @api_router.get("/projects/{project_id}/export/{format}")
 async def export_model(project_id: str, format: str):
