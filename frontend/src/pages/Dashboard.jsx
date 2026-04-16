@@ -300,6 +300,7 @@ export default function Dashboard() {
   const isProcessing = processingStatus && 
     ["queued", "preprocessing", "training", "postprocessing"].includes(processingStatus.status);
   const isCompleted = processingStatus?.status === "completed";
+  const isDemoModel = Boolean(modelData?.is_demo);
 
   return (
     <>
@@ -433,6 +434,7 @@ export default function Dashboard() {
               modelData={modelData}
               isProcessing={isProcessing}
               processingStatus={processingStatus}
+              isDemo={isDemoModel}
             />
           )}
           
