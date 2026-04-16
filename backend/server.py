@@ -617,6 +617,40 @@ async def list_project_images(project_id: str):
     images = await db.images.find({"project_id": project_id}, {"_id": 0}).to_list(1000)
     return images
 
+@api_router.delete("/images/{image_id}")
+async def delete_image(image_id: str):
+    image = await db.images.find_one({"id": image_id}, {"_id": 0})
+    if not image:
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    delete_result = await db.images.delete_one({"id": image_id})
+    if delete_result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    file_paths = [image.get("file_path"), image.get("thumbnail_path")]
+    for path in file_paths:
+        if not path:
+            continue
+        try:
+            Path(path).unlink(missing_ok=True)
+        except OSError as exc:
+            logging.warning(f"Failed to remove file for image {image_id}: {path}. Error: {exc}")
+
+    project_id = image.get("project_id")
+    if project_id:
+        image_count = await db.images.count_documents({"project_id": project_id})
+        await db.projects.update_one(
+            {"id": project_id},
+            {
+                "$set": {
+                    "image_count": image_count,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+            },
+        )
+
+    return {"message": "Image deleted successfully", "image_id": image_id}
+
 # Thumbnail endpoint
 @api_router.get("/images/{image_id}/thumbnail")
 async def get_image_thumbnail(image_id: str):
