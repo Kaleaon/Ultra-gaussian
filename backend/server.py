@@ -1,5 +1,5 @@
 from fastapi import FastAPI, APIRouter, Depends, File, UploadFile, HTTPException, BackgroundTasks, Query, Request
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, JSONResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -980,26 +980,53 @@ async def get_mesh(project_id: str):
     project = await db.projects.find_one({"id": project_id}, {"_id": 0})
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    
+
+    if project.get("status") != "completed":
+        return JSONResponse(
+            status_code=409,
+            content={
+                "mesh_ready": False,
+                "project_id": project_id,
+                "reason": "processing_incomplete",
+                "detail": "Mesh is not available until processing completes",
+            },
+        )
+
     # Try to load triangle mesh
     mesh_path = MODELS_DIR / project_id / "triangles.json"
     if mesh_path.exists():
         with open(mesh_path) as f:
             mesh_data = json.load(f)
-            return {"format": "triangle", "triangles": mesh_data.get("triangles", []), "project_id": project_id}
-    
-    # Generate demo triangles from Gaussian splats
+            return {
+                "mesh_ready": True,
+                "format": "triangle",
+                "triangles": mesh_data.get("triangles", []),
+                "project_id": project_id,
+            }
+
+    # Fall back to converting trained Gaussian splats if available.
     model_path = MODELS_DIR / project_id / "model.json"
     if model_path.exists():
         with open(model_path) as f:
             model_data = json.load(f)
             splats = model_data.get("splats", [])
             triangles = convert_splats_to_triangles(splats)
-            return {"format": "triangle", "triangles": triangles, "project_id": project_id}
-    
-    # Fallback to demo mesh
-    demo_triangles = generate_demo_triangles()
-    return {"format": "triangle", "triangles": demo_triangles, "project_id": project_id}
+            return {
+                "mesh_ready": True,
+                "format": "triangle",
+                "triangles": triangles,
+                "project_id": project_id,
+            }
+
+    return JSONResponse(
+        status_code=404,
+        content={
+            "mesh_ready": False,
+            "project_id": project_id,
+            "reason": "mesh_artifacts_missing",
+            "detail": "Mesh artifacts are not available yet",
+        },
+    )
 
 @api_router.get("/device-capabilities")
 async def get_device_capabilities():
@@ -1196,32 +1223,6 @@ def generate_off_mesh(model_path=None):
         base = i * 3
         lines.append(f"3 {base} {base+1} {base+2} {cr} {cg} {cb} 200\n")
     return "".join(lines)
-
-def generate_demo_triangles():
-    """Generate demo triangle data for mesh preview."""
-    import random
-    import math
-    
-    triangles = []
-    num_triangles = 300
-    for i in range(num_triangles):
-        theta = random.uniform(0, 2 * math.pi)
-        phi = random.uniform(0, math.pi)
-        r = 0.8 + random.gauss(0, 0.15)
-        cx = r * math.sin(phi) * math.cos(theta)
-        cy = r * math.sin(phi) * math.sin(theta)
-        cz = r * math.cos(phi)
-        size = 0.02 + random.uniform(0, 0.03)
-        verts = []
-        for k in range(3):
-            angle = k * 2 * math.pi / 3
-            verts.append([cx + size * math.cos(angle), cy + size * math.sin(angle), cz + random.gauss(0, 0.005)])
-        triangles.append({
-            "vertices": verts,
-            "color": [int(128 + 127 * math.sin(theta)), int(128 + 127 * math.cos(phi)), int(128 + 127 * math.sin(theta + phi))],
-            "opacity": random.uniform(0.6, 1.0),
-        })
-    return triangles
 
 def convert_splats_to_triangles(splats):
     """Convert splat dicts to triangle dicts for mesh preview."""
