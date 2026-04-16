@@ -305,7 +305,19 @@ export default function Dashboard() {
       toast.success(`Exported as ${format.toUpperCase()}`);
     } catch (error) {
       console.error("Export error:", error);
-      toast.error("Export failed");
+      const status = error.response?.status;
+      const detail = error.response?.data?.detail;
+      const message =
+        typeof detail === "object" && detail !== null
+          ? `${detail.message ?? "Export failed"} ${detail.action ?? ""}`.trim()
+          : status === 409
+            ? "Model is still processing. Run processing before export."
+            : status === 404
+              ? "No trained model payload found. Run processing before export."
+              : status === 400
+                ? "Model payload is empty. Run processing before export."
+                : "Export failed";
+      toast.error(message);
     }
   };
 
@@ -515,6 +527,7 @@ export default function Dashboard() {
             onExport={handleExport}
             disabled={!isCompleted}
             renderer={settings.renderer}
+            disabledMessage="Run processing before export."
           />
         </div>
       </main>
