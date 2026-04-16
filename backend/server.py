@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, File, UploadFile, HTTPException, BackgroundTasks, Query
+from fastapi import FastAPI, APIRouter, Depends, File, UploadFile, HTTPException, BackgroundTasks, Query, Request
 from fastapi.responses import FileResponse, Response
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -43,8 +43,23 @@ THUMBNAILS_DIR.mkdir(exist_ok=True)
 # Create the main app
 app = FastAPI(title="Instant3D - Gaussian Splatting API")
 
+PUBLIC_API_ALLOWLIST = {"/api/health"}
+
+
+def verify_api_key(request: Request):
+    """Protect API routes with a shared API key sent in X-API-Key."""
+    if request.url.path in PUBLIC_API_ALLOWLIST:
+        return
+
+    expected_api_key = os.environ.get("API_KEY")
+    provided_api_key = request.headers.get("X-API-Key")
+
+    if not expected_api_key or provided_api_key != expected_api_key:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
 # Create a router with the /api prefix
-api_router = APIRouter(prefix="/api")
+api_router = APIRouter(prefix="/api", dependencies=[Depends(verify_api_key)])
 
 # === MODELS ===
 
