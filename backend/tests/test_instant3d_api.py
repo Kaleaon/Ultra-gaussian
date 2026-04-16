@@ -16,6 +16,7 @@ import requests
 import os
 import json
 import io
+from pathlib import Path
 from PIL import Image
 
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
@@ -150,15 +151,24 @@ class TestMeshAndModelData:
     """Mesh and model data retrieval tests"""
     
     @pytest.fixture
-    def test_project(self):
-        """Create a test project"""
+    def project_without_artifacts(self):
+        """Create a test project with no generated model or mesh artifacts."""
         response = requests.post(f"{BASE_URL}/api/projects", json={
             "name": "TEST_Mesh_Model_Data",
             "description": "Test mesh and model data"
         })
         project = response.json()
+        project_id = project["id"]
+        models_dir = Path("/app/backend/models") / project_id
+
+        # Ensure this project starts with no artifacts for readiness/error checks
+        if (models_dir / "model.json").exists():
+            (models_dir / "model.json").unlink()
+        if (models_dir / "triangles.json").exists():
+            (models_dir / "triangles.json").unlink()
+
         yield project
-        requests.delete(f"{BASE_URL}/api/projects/{project['id']}")
+        requests.delete(f"{BASE_URL}/api/projects/{project_id}")
     
     def test_get_mesh_not_ready_for_unprocessed_project(self, test_project):
         """GET /api/projects/{id}/mesh returns explicit not-ready payload before processing"""
@@ -168,24 +178,112 @@ class TestMeshAndModelData:
         assert data["mesh_ready"] is False
         assert data["reason"] == "processing_incomplete"
         print("✓ Mesh endpoint returned explicit not-ready state")
+    @pytest.fixture
+    def project_with_model_and_mesh_artifacts(self):
+        """Create a test project and write model/mesh artifacts for positive-path endpoint checks."""
+        response = requests.post(f"{BASE_URL}/api/projects", json={
+            "name": "TEST_Mesh_Model_Artifacts",
+            "description": "Test mesh and model endpoints with real artifacts"
+        })
+        project = response.json()
+        project_id = project["id"]
+
+        models_dir = Path("/app/backend/models") / project_id
+        models_dir.mkdir(parents=True, exist_ok=True)
+
+        model_splats = [
+            {
+                "position": [0.1, 0.2, 0.3],
+                "scale": [0.01, 0.01, 0.02],
+                "rotation": [1.0, 0.0, 0.0, 0.0],
+                "color": [255, 128, 64],
+                "opacity": 0.95,
+            },
+            {
+                "position": [-0.2, 0.05, 0.6],
+                "scale": [0.02, 0.015, 0.01],
+                "rotation": [0.707, 0.0, 0.707, 0.0],
+                "color": [10, 220, 180],
+                "opacity": 0.7,
+            },
+        ]
+        triangles = [
+            {
+                "vertices": [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+                "color": [255, 0, 0],
+                "opacity": 0.8
+            },
+            {
+                "vertices": [[0, 0, 1], [1, 0, 1], [0, 1, 1]],
+                "color": [0, 255, 0],
+                "opacity": 0.6
+            },
+        ]
+
+        with open(models_dir / "model.json", "w") as f:
+            json.dump(
+                {
+                    "format": "gaussian_splat",
+                    "training": "differentiable_rendering",
+                    "num_splats": len(model_splats),
+                    "splats": model_splats,
+                },
+                f,
+            )
+        with open(models_dir / "triangles.json", "w") as f:
+            json.dump({"triangles": triangles}, f)
+
+        yield {
+            "project": project,
+            "expected_model_splats": model_splats,
+            "expected_triangles": triangles,
+        }
+
+        requests.delete(f"{BASE_URL}/api/projects/{project_id}")
     
-    def test_get_model_returns_demo_splat_data(self, test_project):
-        """GET /api/projects/{id}/model returns demo splat data"""
-        response = requests.get(f"{BASE_URL}/api/projects/{test_project['id']}/model")
+    def test_get_mesh_without_model_returns_readiness_error(self, project_without_artifacts):
+        """GET /api/projects/{id}/mesh returns a readiness error when no model or mesh artifacts exist."""
+        response = requests.get(f"{BASE_URL}/api/projects/{project_without_artifacts['id']}/mesh")
+        assert response.status_code == 400
+        data = response.json()
+        assert "detail" in data
+        assert "ready" in data["detail"].lower() or "model" in data["detail"].lower()
+        print(f"✓ Mesh endpoint readiness check returned expected error: {data['detail']}")
+    
+    def test_get_model_without_model_returns_readiness_error(self, project_without_artifacts):
+        """GET /api/projects/{id}/model returns a readiness error when no model artifact exists."""
+        response = requests.get(f"{BASE_URL}/api/projects/{project_without_artifacts['id']}/model")
+        assert response.status_code == 400
+        data = response.json()
+        assert "detail" in data
+        assert "ready" in data["detail"].lower() or "model" in data["detail"].lower()
+        print(f"✓ Model endpoint readiness check returned expected error: {data['detail']}")
+
+    def test_get_model_with_model_artifact_returns_model_data(self, project_with_model_and_mesh_artifacts):
+        """GET /api/projects/{id}/model returns data from persisted model artifacts."""
+        project = project_with_model_and_mesh_artifacts["project"]
+        expected_splats = project_with_model_and_mesh_artifacts["expected_model_splats"]
+
+        response = requests.get(f"{BASE_URL}/api/projects/{project['id']}/model")
         assert response.status_code == 200
         data = response.json()
-        assert data["format"] == "splat"
-        assert "data" in data
-        assert len(data["data"]) > 0
-        
-        # Verify splat structure
-        splat = data["data"][0]
-        assert "position" in splat
-        assert "scale" in splat
-        assert "rotation" in splat
-        assert "color" in splat
-        assert "opacity" in splat
-        print(f"✓ Model endpoint returned {len(data['data'])} splats")
+        assert data["format"] == "gaussian_splat"
+        assert data["training"] == "differentiable_rendering"
+        assert data["num_splats"] == len(expected_splats)
+        assert data["data"] == expected_splats
+        print(f"✓ Model endpoint returned persisted model artifact with {len(data['data'])} splats")
+
+    def test_get_mesh_with_mesh_artifact_returns_triangle_data(self, project_with_model_and_mesh_artifacts):
+        """GET /api/projects/{id}/mesh returns triangle data from persisted mesh artifacts."""
+        project = project_with_model_and_mesh_artifacts["project"]
+        expected_triangles = project_with_model_and_mesh_artifacts["expected_triangles"]
+
+        response = requests.get(f"{BASE_URL}/api/projects/{project['id']}/mesh")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["format"] == "triangle"
+        assert data["triangles"] == expected_triangles
+        print(f"✓ Mesh endpoint returned persisted mesh artifact with {len(data['triangles'])} triangles")
 
 
 class TestExportEndpoints:
