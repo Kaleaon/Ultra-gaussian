@@ -462,7 +462,7 @@ async def extract_frames_from_video(job_id: str, project_id: str, video_path: st
         frame_files = sorted(frames_dir.glob("*.jpg"))
         masked_count = 0
         for i, frame_file in enumerate(frame_files):
-            result = classify_frame(str(frame_file))
+            result = await asyncio.to_thread(classify_frame, str(frame_file))
             
             if result["classification"] not in ["filtered", "error"]:
                 people_masked = result.get("people_masked", False)
@@ -622,7 +622,7 @@ async def upload_images(project_id: str, files: List[UploadFile] = File(...)):
         await stream_upload_to_path(file, file_path, MAX_IMAGE_BYTES)
         
         # Classify uploaded image (masks people instead of discarding)
-        classification_result = classify_frame(str(file_path))
+        classification_result = await asyncio.to_thread(classify_frame, str(file_path))
         
         # Only discard if >85% person (selfie) or error
         if classification_result["classification"] not in ["filtered", "error"]:
