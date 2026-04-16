@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 
-export default function GaussianViewer({ modelData, isProcessing, processingStatus }) {
+export default function GaussianViewer({ modelData, modelNotReady = false, isProcessing, processingStatus }) {
   const canvasRef = useRef(null);
   const [rotation, setRotation] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
@@ -153,11 +153,14 @@ export default function GaussianViewer({ modelData, isProcessing, processingStat
           ctx.fill();
         });
       } else if (!isProcessing) {
-        // Draw placeholder
         ctx.fillStyle = "#1a1a1a";
         ctx.font = "14px JetBrains Mono";
         ctx.textAlign = "center";
-        ctx.fillText("Upload images to generate 3D model", centerX, centerY);
+        ctx.fillText(
+          modelNotReady ? "No trained model yet — run processing first" : "Upload images to generate 3D model",
+          centerX,
+          centerY
+        );
       }
 
       animationRef.current = requestAnimationFrame(render);
@@ -322,10 +325,10 @@ export default function GaussianViewer({ modelData, isProcessing, processingStat
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
           <Box className="w-16 h-16 text-[var(--surface-variant)] mb-4" />
           <p className="text-lg font-medium text-[var(--on-surface)] mb-2">
-            No Model Loaded
+            {modelNotReady ? "No Trained Model Yet" : "No Model Loaded"}
           </p>
           <p className="text-sm text-[var(--outline)]">
-            Upload images and start processing
+            {modelNotReady ? "Upload images and run training to generate a model." : "Upload images and start processing"}
           </p>
         </div>
       )}

@@ -20,6 +20,7 @@ export default function Dashboard() {
   const [images, setImages] = useState([]);
   const [processingStatus, setProcessingStatus] = useState(null);
   const [modelData, setModelData] = useState(null);
+  const [modelNotReady, setModelNotReady] = useState(false);
   const [meshData, setMeshData] = useState(null);
   const [deviceCapabilities, setDeviceCapabilities] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -220,6 +221,7 @@ export default function Dashboard() {
       // Start processing
       const response = await axios.post(`${API}/projects/${project.id}/process`);
       setProcessingStatus({ status: "queued", progress: 0, current_step: "Initializing..." });
+      setModelNotReady(false);
       toast.success("Processing started!");
     } catch (error) {
       console.error("Error starting processing:", error);
@@ -236,7 +238,15 @@ export default function Dashboard() {
     try {
       const response = await axios.get(`${API}/projects/${id}/model`);
       setModelData(response.data);
+      setModelNotReady(false);
     } catch (error) {
+      if (error.response?.status === 404) {
+        setModelData(null);
+        setModelNotReady(true);
+        return;
+      }
+      setModelData(null);
+      setModelNotReady(false);
       console.error("Error fetching model:", error);
     }
   };
@@ -291,6 +301,8 @@ export default function Dashboard() {
       setImages([]);
       setProcessingStatus(null);
       setModelData(null);
+      setMeshData(null);
+      setModelNotReady(false);
       toast.success("New project created");
     } catch (error) {
       toast.error("Failed to create new project");
@@ -431,6 +443,7 @@ export default function Dashboard() {
           ) : (
             <GaussianViewer
               modelData={modelData}
+              modelNotReady={modelNotReady}
               isProcessing={isProcessing}
               processingStatus={processingStatus}
             />
@@ -451,22 +464,6 @@ export default function Dashboard() {
             )}
           </div>
 
-          {/* Load Demo Preview */}
-          {!isProcessing && !modelData && !meshData && project && (
-            <button
-              className="absolute bottom-16 left-1/2 -translate-x-1/2 px-4 py-2 bg-[var(--surface)]/80 backdrop-blur-sm border border-[var(--surface-variant)] rounded-lg text-xs text-[var(--copper-base)] hover:bg-[var(--surface)] transition-colors"
-              onClick={() => {
-                if (settings.renderer === "triangle") {
-                  fetchMeshData(project.id);
-                } else {
-                  fetchModelData(project.id);
-                }
-              }}
-              data-testid="load-preview-btn"
-            >
-              Load Demo Preview
-            </button>
-          )}
         </div>
 
         {/* Right Panel - Settings & Export */}

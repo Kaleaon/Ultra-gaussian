@@ -934,9 +934,7 @@ async def get_model(project_id: str):
                 "project_id": project_id,
             }
     
-    # Fallback to demo data
-    demo_splat_data = generate_demo_splat_data()
-    return {"format": "splat", "data": demo_splat_data, "project_id": project_id}
+    raise HTTPException(status_code=404, detail="Model not generated yet")
 
 @api_router.get("/projects/{project_id}/export/{format}")
 async def export_model(project_id: str, format: str):
@@ -1012,36 +1010,6 @@ async def get_device_capabilities():
     }
 
 # Helper functions
-def generate_demo_splat_data():
-    import random
-    import math
-    
-    splats = []
-    num_points = 5000
-    
-    for i in range(num_points):
-        theta = random.uniform(0, 2 * math.pi)
-        phi = random.uniform(0, math.pi)
-        r = 1.0 + random.gauss(0, 0.2)
-        
-        x = r * math.sin(phi) * math.cos(theta)
-        y = r * math.sin(phi) * math.sin(theta)
-        z = r * math.cos(phi)
-        
-        color_r = int(128 + 127 * math.sin(theta))
-        color_g = int(128 + 127 * math.cos(phi))
-        color_b = int(128 + 127 * math.sin(theta + phi))
-        
-        splats.append({
-            "position": [x, y, z],
-            "scale": [0.01 + random.uniform(0, 0.02)] * 3,
-            "rotation": [0, 0, 0, 1],
-            "color": [color_r, color_g, color_b],
-            "opacity": random.uniform(0.7, 1.0)
-        })
-    
-    return splats
-
 def generate_demo_ply():
     return """ply
 format ascii 1.0
