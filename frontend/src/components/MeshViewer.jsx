@@ -11,7 +11,7 @@ import {
  * MeshViewer - 3D mesh preview for Triangle Splatting exports
  * Renders triangles with wireframe and solid modes
  */
-export default function MeshViewer({ meshData, isProcessing }) {
+export default function MeshViewer({ meshData, isProcessing, meshReady = false }) {
   const canvasRef = useRef(null);
   const [rotation, setRotation] = useState({ x: 30, y: 45 });
   const [zoom, setZoom] = useState(1);
@@ -64,7 +64,7 @@ export default function MeshViewer({ meshData, isProcessing }) {
       }
 
       // Draw triangles
-      if (meshData && meshData.triangles) {
+      if (meshReady && meshData && meshData.triangles) {
         const triangles = meshData.triangles;
         const rotX = (rotation.x * Math.PI) / 180;
         const rotY = (rotation.y * Math.PI) / 180;
@@ -166,7 +166,7 @@ export default function MeshViewer({ meshData, isProcessing }) {
         ctx.fillStyle = "#1a1a1a";
         ctx.font = "14px JetBrains Mono";
         ctx.textAlign = "center";
-        ctx.fillText("No mesh data - select Triangle renderer", centerX, centerY);
+        ctx.fillText("Mesh not available yet", centerX, centerY);
       }
 
       animationRef.current = requestAnimationFrame(render);
@@ -207,12 +207,16 @@ export default function MeshViewer({ meshData, isProcessing }) {
     return normal;
   }
 
+  const controlsDisabled = isProcessing || !meshReady;
+
   const handleMouseDown = (e) => {
+    if (controlsDisabled) return;
     setIsDragging(true);
     setLastMouse({ x: e.clientX, y: e.clientY });
   };
 
   const handleMouseMove = (e) => {
+    if (controlsDisabled) return;
     if (!isDragging) return;
     const dx = e.clientX - lastMouse.x;
     const dy = e.clientY - lastMouse.y;
@@ -228,6 +232,7 @@ export default function MeshViewer({ meshData, isProcessing }) {
   };
 
   const handleWheel = (e) => {
+    if (controlsDisabled) return;
     e.preventDefault();
     const delta = e.deltaY > 0 ? 0.9 : 1.1;
     setZoom((prev) => Math.max(0.5, Math.min(3, prev * delta)));
@@ -259,14 +264,14 @@ export default function MeshViewer({ meshData, isProcessing }) {
       )}
 
       {/* Empty State */}
-      {!meshData && !isProcessing && (
+      {(!meshData || !meshReady) && !isProcessing && (
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
           <Layers className="w-16 h-16 text-[var(--surface-variant)] mb-4" />
           <p className="text-lg font-medium text-[var(--on-surface)] mb-2">
             Mesh Preview
           </p>
           <p className="text-sm text-[var(--outline)]">
-            Select Triangle renderer and process images
+            Mesh not available yet
           </p>
         </div>
       )}
@@ -279,6 +284,7 @@ export default function MeshViewer({ meshData, isProcessing }) {
               <button
                 className="w-10 h-10 flex items-center justify-center rounded-lg border border-[var(--surface-variant)] text-[var(--on-surface)] hover:bg-[var(--surface-variant)] transition-colors"
                 onClick={handleReset}
+                disabled={controlsDisabled}
               >
                 <RotateCcw className="w-4 h-4" />
               </button>
@@ -291,6 +297,7 @@ export default function MeshViewer({ meshData, isProcessing }) {
               <button
                 className="w-10 h-10 flex items-center justify-center rounded-lg border border-[var(--surface-variant)] text-[var(--on-surface)] hover:bg-[var(--surface-variant)] transition-colors"
                 onClick={() => setZoom((z) => Math.min(3, z * 1.2))}
+                disabled={controlsDisabled}
               >
                 <ZoomIn className="w-4 h-4" />
               </button>
@@ -303,6 +310,7 @@ export default function MeshViewer({ meshData, isProcessing }) {
               <button
                 className="w-10 h-10 flex items-center justify-center rounded-lg border border-[var(--surface-variant)] text-[var(--on-surface)] hover:bg-[var(--surface-variant)] transition-colors"
                 onClick={() => setZoom((z) => Math.max(0.5, z * 0.8))}
+                disabled={controlsDisabled}
               >
                 <ZoomOut className="w-4 h-4" />
               </button>
@@ -321,6 +329,7 @@ export default function MeshViewer({ meshData, isProcessing }) {
                     : "border-[var(--surface-variant)] text-[var(--on-surface)] hover:bg-[var(--surface-variant)]"
                 }`}
                 onClick={() => setShowFaces(!showFaces)}
+                disabled={controlsDisabled}
               >
                 <Box className="w-4 h-4" />
               </button>
@@ -337,6 +346,7 @@ export default function MeshViewer({ meshData, isProcessing }) {
                     : "border-[var(--surface-variant)] text-[var(--on-surface)] hover:bg-[var(--surface-variant)]"
                 }`}
                 onClick={() => setShowWireframe(!showWireframe)}
+                disabled={controlsDisabled}
               >
                 <Layers className="w-4 h-4" />
               </button>
@@ -353,6 +363,7 @@ export default function MeshViewer({ meshData, isProcessing }) {
                     : "border-[var(--surface-variant)] text-[var(--on-surface)] hover:bg-[var(--surface-variant)]"
                 }`}
                 onClick={() => setShowGrid(!showGrid)}
+                disabled={controlsDisabled}
               >
                 <Grid3X3 className="w-4 h-4" />
               </button>
@@ -363,7 +374,7 @@ export default function MeshViewer({ meshData, isProcessing }) {
       </div>
 
       {/* Rotation Info */}
-      {meshData && (
+      {meshReady && meshData && (
         <div className="absolute top-4 left-4 bg-[var(--surface)]/80 backdrop-blur-sm px-3 py-2 rounded-lg">
           <p className="text-[0.65rem] text-[var(--outline)] font-mono">
             X: {Math.round(rotation.x)}° Y: {Math.round(rotation.y)}° Z: {(zoom * 100).toFixed(0)}%

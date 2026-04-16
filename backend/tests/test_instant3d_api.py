@@ -170,6 +170,14 @@ class TestMeshAndModelData:
         yield project
         requests.delete(f"{BASE_URL}/api/projects/{project_id}")
     
+    def test_get_mesh_not_ready_for_unprocessed_project(self, test_project):
+        """GET /api/projects/{id}/mesh returns explicit not-ready payload before processing"""
+        response = requests.get(f"{BASE_URL}/api/projects/{test_project['id']}/mesh")
+        assert response.status_code == 409
+        data = response.json()
+        assert data["mesh_ready"] is False
+        assert data["reason"] == "processing_incomplete"
+        print("✓ Mesh endpoint returned explicit not-ready state")
     @pytest.fixture
     def project_with_model_and_mesh_artifacts(self):
         """Create a test project and write model/mesh artifacts for positive-path endpoint checks."""

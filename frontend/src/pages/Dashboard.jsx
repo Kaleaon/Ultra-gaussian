@@ -28,6 +28,7 @@ export default function Dashboard() {
   const [processingStatus, setProcessingStatus] = useState(null);
   const [modelData, setModelData] = useState(null);
   const [meshData, setMeshData] = useState(null);
+  const [meshReady, setMeshReady] = useState(false);
   const [deviceCapabilities, setDeviceCapabilities] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [settings, setSettings] = useState({
@@ -280,7 +281,19 @@ export default function Dashboard() {
     try {
       const response = await axios.get(`${API}/projects/${id}/mesh`);
       setMeshData(response.data);
+      setMeshReady(Boolean(response.data?.mesh_ready));
     } catch (error) {
+      const notReadyStatus = [404, 409].includes(error?.response?.status);
+      const notReadyPayload = error?.response?.data || {};
+      if (notReadyStatus || notReadyPayload?.mesh_ready === false) {
+        setMeshData({
+          mesh_ready: false,
+          project_id: id,
+          detail: notReadyPayload?.detail || "Mesh not available yet",
+        });
+        setMeshReady(false);
+        return;
+      }
       console.error("Error fetching mesh:", error);
     }
   };
@@ -335,6 +348,8 @@ export default function Dashboard() {
       setImages([]);
       setProcessingStatus(null);
       setModelData(null);
+      setMeshData(null);
+      setMeshReady(false);
       setModelFetchState(MODEL_FETCH_STATES.IDLE);
       toast.success("New project created");
     } catch (error) {
@@ -472,6 +487,7 @@ export default function Dashboard() {
             <MeshViewer
               meshData={meshData}
               isProcessing={isProcessing}
+              meshReady={meshReady}
             />
           ) : (
             <GaussianViewer
