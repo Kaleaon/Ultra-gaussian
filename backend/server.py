@@ -40,6 +40,10 @@ VIDEOS_DIR.mkdir(exist_ok=True)
 THUMBNAILS_DIR = ROOT_DIR / "thumbnails"
 THUMBNAILS_DIR.mkdir(exist_ok=True)
 
+MAX_IMAGE_BYTES = 20 * 1024 * 1024
+MAX_VIDEO_BYTES = 500 * 1024 * 1024
+UPLOAD_CHUNK_SIZE = 1024 * 1024
+
 # Create the main app
 app = FastAPI(title="Instant3D - Gaussian Splatting API")
 
@@ -123,6 +127,34 @@ class VideoExtractionJob(BaseModel):
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
     error_message: Optional[str] = None
+
+
+async def stream_upload_to_path(upload_file: UploadFile, destination: Path, max_bytes: int) -> int:
+    """Stream an UploadFile to disk with byte limit enforcement."""
+    bytes_written = 0
+
+    try:
+        with open(destination, "wb") as output_file:
+            while True:
+                chunk = await upload_file.read(UPLOAD_CHUNK_SIZE)
+                if not chunk:
+                    break
+
+                bytes_written += len(chunk)
+                if bytes_written > max_bytes:
+                    raise HTTPException(status_code=413, detail="Payload Too Large")
+
+                output_file.write(chunk)
+    except HTTPException:
+        if destination.exists():
+            destination.unlink()
+        raise
+    except Exception:
+        if destination.exists():
+            destination.unlink()
+        raise
+
+    return bytes_written
 
 # === PERSON MASKING & CLASSIFICATION ===
 
@@ -557,17 +589,20 @@ async def upload_images(project_id: str, files: List[UploadFile] = File(...)):
     project_dir = UPLOAD_DIR / project_id
     project_dir.mkdir(exist_ok=True)
     
+    allowed_image_exts = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
+
     for file in files:
         if not file.content_type or not file.content_type.startswith("image/"):
             continue
-        
+
+        file_ext = (Path(file.filename).suffix if file.filename else ".jpg").lower()
+        if file.filename and file_ext not in allowed_image_exts:
+            continue
+
         file_id = str(uuid.uuid4())
-        file_ext = Path(file.filename).suffix if file.filename else ".jpg"
         file_path = project_dir / f"{file_id}{file_ext}"
-        
-        content = await file.read()
-        with open(file_path, "wb") as f:
-            f.write(content)
+
+        await stream_upload_to_path(file, file_path, MAX_IMAGE_BYTES)
         
         # Classify uploaded image (masks people instead of discarding)
         classification_result = classify_frame(str(file_path))
@@ -678,7 +713,9 @@ async def upload_video(project_id: str, file: UploadFile = File(...), fps: int =
     
     # Validate file type
     allowed_types = ["video/mp4", "video/webm", "video/quicktime", "video/x-msvideo", "video/mpeg"]
-    if file.content_type not in allowed_types:
+    allowed_video_exts = {".mp4", ".webm", ".mov", ".avi", ".mpeg", ".mpg"}
+    file_ext = (Path(file.filename).suffix if file.filename else ".mp4").lower()
+    if file.content_type not in allowed_types or (file.filename and file_ext not in allowed_video_exts):
         raise HTTPException(status_code=400, detail="Invalid file type. Allowed: MP4, WebM, MOV, AVI, MPEG")
     
     # Save video file
@@ -686,12 +723,9 @@ async def upload_video(project_id: str, file: UploadFile = File(...), fps: int =
     video_dir = VIDEOS_DIR / job_id
     video_dir.mkdir(exist_ok=True)
     
-    file_ext = Path(file.filename).suffix if file.filename else ".mp4"
     video_path = video_dir / f"video{file_ext}"
-    
-    content = await file.read()
-    with open(video_path, "wb") as f:
-        f.write(content)
+
+    await stream_upload_to_path(file, video_path, MAX_VIDEO_BYTES)
     
     # Create job record
     job = VideoExtractionJob(
