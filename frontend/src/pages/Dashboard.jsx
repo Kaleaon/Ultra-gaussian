@@ -14,6 +14,13 @@ import { Progress } from "@/components/ui/progress";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
+const MODEL_FETCH_STATES = {
+  IDLE: "idle",
+  PROCESSING: "processing",
+  NOT_READY: "not_ready",
+  READY: "ready",
+  ERROR: "error",
+};
 
 export default function Dashboard() {
   const [project, setProject] = useState(null);
@@ -31,6 +38,7 @@ export default function Dashboard() {
     renderer: "gaussian",  // "gaussian" or "triangle"
   });
   const [youtubeJobs, setYoutubeJobs] = useState([]);
+  const [modelFetchState, setModelFetchState] = useState(MODEL_FETCH_STATES.IDLE);
 
   // Initialize project on mount
   useEffect(() => {
@@ -54,7 +62,10 @@ export default function Dashboard() {
           toast.success("3D Model generation complete!");
           fetchModelData();
           fetchMeshData();
+        } else if (["queued", "preprocessing", "training", "postprocessing"].includes(response.data.status)) {
+          setModelFetchState(MODEL_FETCH_STATES.PROCESSING);
         } else if (response.data.status === "failed") {
+          setModelFetchState(MODEL_FETCH_STATES.ERROR);
           toast.error("Processing failed: " + response.data.error_message);
         }
       } catch (error) {
@@ -115,10 +126,17 @@ export default function Dashboard() {
         const statusResponse = await axios.get(`${API}/projects/${latestProject.id}/processing-status`);
         if (statusResponse.data.status !== "no_job") {
           setProcessingStatus(statusResponse.data);
+          if (["queued", "preprocessing", "training", "postprocessing"].includes(statusResponse.data.status)) {
+            setModelFetchState(MODEL_FETCH_STATES.PROCESSING);
+          } else if (statusResponse.data.status === "failed") {
+            setModelFetchState(MODEL_FETCH_STATES.ERROR);
+          }
           if (statusResponse.data.status === "completed") {
             fetchModelData(latestProject.id);
             fetchMeshData(latestProject.id);
           }
+        } else {
+          setModelFetchState(MODEL_FETCH_STATES.IDLE);
         }
       } else {
         // Create new project
@@ -218,8 +236,10 @@ export default function Dashboard() {
       await axios.patch(`${API}/projects/${project.id}/settings`, settings);
       
       // Start processing
-      const response = await axios.post(`${API}/projects/${project.id}/process`);
+      await axios.post(`${API}/projects/${project.id}/process`);
       setProcessingStatus({ status: "queued", progress: 0, current_step: "Initializing..." });
+      setModelData(null);
+      setModelFetchState(MODEL_FETCH_STATES.PROCESSING);
       toast.success("Processing started!");
     } catch (error) {
       console.error("Error starting processing:", error);
@@ -235,9 +255,21 @@ export default function Dashboard() {
 
     try {
       const response = await axios.get(`${API}/projects/${id}/model`);
-      setModelData(response.data);
+      if (response.data?.data?.length > 0) {
+        setModelData(response.data);
+        setModelFetchState(MODEL_FETCH_STATES.READY);
+      } else {
+        setModelData(null);
+        setModelFetchState(MODEL_FETCH_STATES.NOT_READY);
+      }
     } catch (error) {
       console.error("Error fetching model:", error);
+      if (error.response?.status === 404 || error.response?.status === 409) {
+        setModelData(null);
+        setModelFetchState(MODEL_FETCH_STATES.NOT_READY);
+      } else {
+        setModelFetchState(MODEL_FETCH_STATES.ERROR);
+      }
     }
   };
 
@@ -291,6 +323,7 @@ export default function Dashboard() {
       setImages([]);
       setProcessingStatus(null);
       setModelData(null);
+      setModelFetchState(MODEL_FETCH_STATES.IDLE);
       toast.success("New project created");
     } catch (error) {
       toast.error("Failed to create new project");
@@ -433,6 +466,7 @@ export default function Dashboard() {
               modelData={modelData}
               isProcessing={isProcessing}
               processingStatus={processingStatus}
+              modelFetchState={modelFetchState}
             />
           )}
           
