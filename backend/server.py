@@ -6,7 +6,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
 from pathlib import Path
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, ValidationError
 from typing import List, Optional, Literal
 import uuid
 from datetime import datetime, timezone
@@ -67,15 +67,18 @@ class Project(BaseModel):
         "quality": "high",
         "resolution": 1024,
         "iterations": 30000,
-        "sh_degree": 3
+        "sh_degree": 3,
+        "renderer": "gaussian",
+        "image_max_dim": 1024,
     })
 
 class ProcessingSettings(BaseModel):
-    quality: str = "high"
-    resolution: int = 1024
-    iterations: int = 30000
-    sh_degree: int = 3
-    renderer: str = "gaussian"  # "gaussian" or "triangle"
+    quality: Literal["low", "medium", "high", "ultra"] = "high"
+    resolution: int = Field(default=1024, ge=512, le=2048, multiple_of=256)
+    iterations: int = Field(default=30000, ge=7000, le=30000, multiple_of=1000)
+    sh_degree: int = Field(default=3, ge=0, le=3)
+    renderer: Literal["gaussian", "triangle"] = "gaussian"
+    image_max_dim: int = Field(default=1024, ge=512, le=2048, multiple_of=256)
 
 class ImageUpload(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -123,6 +126,21 @@ class VideoExtractionJob(BaseModel):
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
     error_message: Optional[str] = None
+
+
+def validate_processing_settings(settings: dict) -> dict:
+    """Validate and normalize processing settings from API/database."""
+    try:
+        validated = ProcessingSettings.model_validate(settings)
+        return validated.model_dump()
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Invalid processing settings",
+                "errors": exc.errors(),
+            },
+        ) from exc
 
 # === PERSON MASKING & CLASSIFICATION ===
 
@@ -538,9 +556,10 @@ async def delete_project(project_id: str):
 
 @api_router.patch("/projects/{project_id}/settings")
 async def update_project_settings(project_id: str, settings: ProcessingSettings):
+    validated_settings = validate_processing_settings(settings.model_dump())
     result = await db.projects.update_one(
         {"id": project_id},
-        {"$set": {"settings": settings.model_dump(), "updated_at": datetime.now(timezone.utc).isoformat()}}
+        {"$set": {"settings": validated_settings, "updated_at": datetime.now(timezone.utc).isoformat()}}
     )
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -847,7 +866,7 @@ async def start_processing(project_id: str, background_tasks: BackgroundTasks):
     await db.processing_jobs.insert_one(job.model_dump())
     
     # Use real Gaussian Splatting pipeline
-    settings = project.get("settings", {})
+    settings = validate_processing_settings(project.get("settings", {}))
     background_tasks.add_task(run_gaussian_splatting, job.id, project_id, settings)
     
     return {"job_id": job.id, "status": "started"}

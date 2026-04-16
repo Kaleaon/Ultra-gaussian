@@ -14,6 +14,13 @@ import { Progress } from "@/components/ui/progress";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
+const DEFAULT_SETTINGS = {
+  quality: "high",
+  resolution: 1024,
+  iterations: 30000,
+  sh_degree: 3,
+  renderer: "gaussian",
+};
 
 export default function Dashboard() {
   const [project, setProject] = useState(null);
@@ -23,13 +30,7 @@ export default function Dashboard() {
   const [meshData, setMeshData] = useState(null);
   const [deviceCapabilities, setDeviceCapabilities] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [settings, setSettings] = useState({
-    quality: "high",
-    resolution: 1024,
-    iterations: 30000,
-    sh_degree: 3,
-    renderer: "gaussian",  // "gaussian" or "triangle"
-  });
+  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [youtubeJobs, setYoutubeJobs] = useState([]);
 
   // Initialize project on mount
@@ -105,7 +106,7 @@ export default function Dashboard() {
       if (response.data.length > 0) {
         const latestProject = response.data[0];
         setProject(latestProject);
-        setSettings(latestProject.settings || settings);
+        setSettings({ ...DEFAULT_SETTINGS, ...(latestProject.settings || {}) });
         
         // Fetch images for this project
         const imagesResponse = await axios.get(`${API}/projects/${latestProject.id}/images`);

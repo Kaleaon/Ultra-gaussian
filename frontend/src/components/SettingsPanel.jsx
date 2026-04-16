@@ -153,7 +153,7 @@ export default function SettingsPanel({ settings, onSettingsChange, disabled }) 
             value={[settings.iterations]}
             onValueChange={([value]) => updateSetting("iterations", value)}
             min={7000}
-            max={50000}
+            max={30000}
             step={1000}
             disabled={disabled}
             className="py-2"
@@ -161,7 +161,7 @@ export default function SettingsPanel({ settings, onSettingsChange, disabled }) 
           />
           <div className="flex justify-between text-[0.65rem] text-[var(--outline)] mt-1">
             <span>7K</span>
-            <span>50K</span>
+            <span>30K</span>
           </div>
         </div>
 

@@ -1062,12 +1062,13 @@ class GaussianSplatPipeline:
 
     async def run(self, progress_callback=None, settings: dict = None):
         settings = settings or {}
-        iterations = min(settings.get("iterations", 1000), 3000)  # cap for CPU
+        iterations = settings.get("iterations", 30000)
 
         # ── Load images ──
         if progress_callback:
             await progress_callback("Loading images …", 2)
-        images, paths = self._load_images()
+        max_dim = settings.get("image_max_dim", 1024)
+        images, paths = self._load_images(max_dim=max_dim)
         if len(images) < 3:
             raise ValueError(f"Need ≥ 3 images, got {len(images)}")
         logger.info(f"Loaded {len(images)} images ({images[0].shape})")
@@ -1101,7 +1102,7 @@ class GaussianSplatPipeline:
             await progress_callback("Complete", 100)
         return splats
 
-    def _load_images(self):
+    def _load_images(self, max_dim: int = 1024):
         exts = {'.jpg', '.jpeg', '.png', '.webp'}
         files = sorted(f for f in self.image_dir.rglob('*') if f.suffix.lower() in exts)
         images, paths = [], []
@@ -1110,7 +1111,6 @@ class GaussianSplatPipeline:
             if img is None:
                 continue
             h, w = img.shape[:2]
-            max_dim = 600
             if max(h, w) > max_dim:
                 s = max_dim / max(h, w)
                 img = cv2.resize(img, (int(w * s), int(h * s)))
