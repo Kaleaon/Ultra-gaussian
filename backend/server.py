@@ -1,5 +1,5 @@
 from fastapi import FastAPI, APIRouter, Depends, File, UploadFile, HTTPException, BackgroundTasks, Query, Request
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, JSONResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -462,7 +462,7 @@ async def extract_frames_from_video(job_id: str, project_id: str, video_path: st
         frame_files = sorted(frames_dir.glob("*.jpg"))
         masked_count = 0
         for i, frame_file in enumerate(frame_files):
-            result = classify_frame(str(frame_file))
+            result = await asyncio.to_thread(classify_frame, str(frame_file))
             
             if result["classification"] not in ["filtered", "error"]:
                 people_masked = result.get("people_masked", False)
@@ -622,7 +622,7 @@ async def upload_images(project_id: str, files: List[UploadFile] = File(...)):
         await stream_upload_to_path(file, file_path, MAX_IMAGE_BYTES)
         
         # Classify uploaded image (masks people instead of discarding)
-        classification_result = classify_frame(str(file_path))
+        classification_result = await asyncio.to_thread(classify_frame, str(file_path))
         
         # Only discard if >85% person (selfie) or error
         if classification_result["classification"] not in ["filtered", "error"]:
@@ -932,9 +932,13 @@ async def get_model(project_id: str):
                 "num_splats": model_data.get("num_splats", len(model_data.get("splats", []))),
                 "data": model_data.get("splats", []),
                 "project_id": project_id,
+                "is_demo": False,
             }
     
     raise HTTPException(status_code=404, detail="Model not generated yet")
+    # Fallback to demo data
+    demo_splat_data = generate_demo_splat_data()
+    return {"format": "splat", "data": demo_splat_data, "project_id": project_id, "is_demo": True}
 
 @api_router.get("/projects/{project_id}/export/{format}")
 async def export_model(project_id: str, format: str):
@@ -946,21 +950,47 @@ async def export_model(project_id: str, format: str):
         raise HTTPException(status_code=404, detail="Project not found")
     
     if project.get("status") != "completed":
-        raise HTTPException(status_code=400, detail="Model not ready for export")
-    
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "MODEL_NOT_READY",
+                "message": "Model not ready for export.",
+                "action": "Run processing before export.",
+            },
+        )
+
     export_path = MODELS_DIR / f"{project_id}_model.{format}"
     
-    # Try to load real model data for proper export
+    # Require real trained model data for export
     model_path = MODELS_DIR / project_id / "model.json"
+    if not model_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "MODEL_PAYLOAD_MISSING",
+                "message": "Trained model payload was not found.",
+                "action": "Run processing before export.",
+            },
+        )
     
-    if format == "off":
-        content = generate_off_mesh(model_path if model_path.exists() else None)
-    elif format == "ply":
-        content = generate_ply_from_model(model_path) if model_path.exists() else generate_demo_ply()
-    elif format == "obj":
-        content = generate_obj_from_model(model_path) if model_path.exists() else generate_demo_obj()
-    else:
-        content = generate_demo_gltf()
+    try:
+        if format == "off":
+            content = generate_off_mesh(model_path)
+        elif format == "ply":
+            content = generate_ply_from_model(model_path)
+        elif format == "obj":
+            content = generate_obj_from_model(model_path)
+        else:
+            content = generate_gltf_from_model(model_path)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "MODEL_PAYLOAD_EMPTY",
+                "message": str(exc),
+                "action": "Run processing before export.",
+            },
+        ) from exc
     
     with open(export_path, "w") as f:
         f.write(content)
@@ -978,26 +1008,53 @@ async def get_mesh(project_id: str):
     project = await db.projects.find_one({"id": project_id}, {"_id": 0})
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    
+
+    if project.get("status") != "completed":
+        return JSONResponse(
+            status_code=409,
+            content={
+                "mesh_ready": False,
+                "project_id": project_id,
+                "reason": "processing_incomplete",
+                "detail": "Mesh is not available until processing completes",
+            },
+        )
+
     # Try to load triangle mesh
     mesh_path = MODELS_DIR / project_id / "triangles.json"
     if mesh_path.exists():
         with open(mesh_path) as f:
             mesh_data = json.load(f)
-            return {"format": "triangle", "triangles": mesh_data.get("triangles", []), "project_id": project_id}
-    
-    # Generate demo triangles from Gaussian splats
+            return {
+                "mesh_ready": True,
+                "format": "triangle",
+                "triangles": mesh_data.get("triangles", []),
+                "project_id": project_id,
+            }
+
+    # Fall back to converting trained Gaussian splats if available.
     model_path = MODELS_DIR / project_id / "model.json"
     if model_path.exists():
         with open(model_path) as f:
             model_data = json.load(f)
             splats = model_data.get("splats", [])
             triangles = convert_splats_to_triangles(splats)
-            return {"format": "triangle", "triangles": triangles, "project_id": project_id}
-    
-    # Fallback to demo mesh
-    demo_triangles = generate_demo_triangles()
-    return {"format": "triangle", "triangles": demo_triangles, "project_id": project_id}
+            return {
+                "mesh_ready": True,
+                "format": "triangle",
+                "triangles": triangles,
+                "project_id": project_id,
+            }
+
+    return JSONResponse(
+        status_code=404,
+        content={
+            "mesh_ready": False,
+            "project_id": project_id,
+            "reason": "mesh_artifacts_missing",
+            "detail": "Mesh artifacts are not available yet",
+        },
+    )
 
 @api_router.get("/device-capabilities")
 async def get_device_capabilities():
@@ -1062,6 +1119,35 @@ def generate_demo_gltf():
         "buffers": []
     }, indent=2)
 
+def generate_demo_splat_data():
+    import random
+    import math
+    
+    splats = []
+    num_points = 5000
+    
+    for i in range(num_points):
+        theta = random.uniform(0, 2 * math.pi)
+        phi = random.uniform(0, math.pi)
+        r = 1.0 + random.gauss(0, 0.2)
+        
+        x = r * math.sin(phi) * math.cos(theta)
+        y = r * math.sin(phi) * math.sin(theta)
+        z = r * math.cos(phi)
+        
+        color_r = int(128 + 127 * math.sin(theta))
+        color_g = int(128 + 127 * math.cos(phi))
+        color_b = int(128 + 127 * math.sin(theta + phi))
+        
+        splats.append({
+            "position": [x, y, z],
+            "scale": [0.01 + random.uniform(0, 0.02)] * 3,
+            "rotation": [0, 0, 0, 1],
+            "color": [color_r, color_g, color_b],
+            "opacity": random.uniform(0.7, 1.0)
+        })
+    
+    return splats
 
 def generate_ply_from_model(model_path):
     """Generate PLY from real trained model data."""
@@ -1069,7 +1155,7 @@ def generate_ply_from_model(model_path):
         data = json.load(f)
     splats = data.get("splats", [])
     if not splats:
-        return generate_demo_ply()
+        raise ValueError("Model payload is empty and cannot be exported.")
     lines = [
         "ply",
         "format ascii 1.0",
@@ -1101,7 +1187,7 @@ def generate_obj_from_model(model_path):
         data = json.load(f)
     splats = data.get("splats", [])
     if not splats:
-        return generate_demo_obj()
+        raise ValueError("Model payload is empty and cannot be exported.")
     lines = ["# Gaussian Splat Export", f"# Generated by Instant3D — {len(splats)} splats"]
     for s in splats:
         p = s["position"]
@@ -1109,87 +1195,58 @@ def generate_obj_from_model(model_path):
         lines.append(f"v {p[0]} {p[1]} {p[2]} {c[0]/255:.4f} {c[1]/255:.4f} {c[2]/255:.4f}")
     return "\n".join(lines) + "\n"
 
-def generate_off_mesh(model_path=None):
-    """Generate OFF mesh content, optionally from a trained model."""
-    import random
-    import math
-    
-    if model_path and Path(model_path).exists():
-        with open(model_path) as f:
-            data = json.load(f)
-            splats = data.get("splats", [])
-            if splats:
-                lines = ["COFF\n"]
-                num_tris = len(splats)
-                lines.append(f"{num_tris * 3} {num_tris} 0\n")
-                for s in splats:
-                    pos = s["position"]
-                    scale = s.get("scale", [0.01, 0.01, 0.01])
-                    size = sum(scale) / len(scale) * 2
-                    for k in range(3):
-                        angle = k * 2 * math.pi / 3
-                        vx = pos[0] + size * math.cos(angle)
-                        vy = pos[1] + size * math.sin(angle)
-                        vz = pos[2]
-                        lines.append(f"{vx} {vy} {vz}\n")
-                for i, s in enumerate(splats):
-                    c = s.get("color", [128, 128, 128])
-                    a = int(s.get("opacity", 0.8) * 255)
-                    base = i * 3
-                    lines.append(f"3 {base} {base+1} {base+2} {c[0]} {c[1]} {c[2]} {a}\n")
-                return "".join(lines)
-    
-    # Generate demo OFF mesh
-    num_triangles = 200
-    lines = ["COFF\n"]
-    lines.append(f"{num_triangles * 3} {num_triangles} 0\n")
-    for i in range(num_triangles):
-        theta = random.uniform(0, 2 * math.pi)
-        phi = random.uniform(0, math.pi)
-        r = 0.8 + random.gauss(0, 0.15)
-        cx = r * math.sin(phi) * math.cos(theta)
-        cy = r * math.sin(phi) * math.sin(theta)
-        cz = r * math.cos(phi)
-        size = 0.03 + random.uniform(0, 0.04)
-        for k in range(3):
-            angle = k * 2 * math.pi / 3 + random.uniform(0, 0.3)
-            vx = cx + size * math.cos(angle)
-            vy = cy + size * math.sin(angle)
-            vz = cz
-            lines.append(f"{vx} {vy} {vz}\n")
-    for i in range(num_triangles):
-        cr = int(128 + 127 * math.sin(i * 0.1))
-        cg = int(128 + 127 * math.cos(i * 0.15))
-        cb = int(128 + 127 * math.sin(i * 0.2 + 1))
-        base = i * 3
-        lines.append(f"3 {base} {base+1} {base+2} {cr} {cg} {cb} 200\n")
-    return "".join(lines)
+def generate_gltf_from_model(model_path):
+    """Generate GLTF metadata shell from real trained model data."""
+    with open(model_path) as f:
+        data = json.load(f)
+    splats = data.get("splats", [])
+    if not splats:
+        raise ValueError("Model payload is empty and cannot be exported.")
+    return json.dumps({
+        "asset": {"version": "2.0", "generator": "Instant3D"},
+        "extras": {
+            "source": "gaussian_splats",
+            "num_splats": len(splats),
+        },
+        "scene": 0,
+        "scenes": [{"nodes": [0]}],
+        "nodes": [{"mesh": 0}],
+        "meshes": [{"primitives": [{"attributes": {"POSITION": 0}}]}],
+        "accessors": [],
+        "bufferViews": [],
+        "buffers": []
+    }, indent=2)
 
-def generate_demo_triangles():
-    """Generate demo triangle data for mesh preview."""
-    import random
+
+def generate_off_mesh(model_path):
+    """Generate OFF mesh content from a trained model."""
     import math
-    
-    triangles = []
-    num_triangles = 300
-    for i in range(num_triangles):
-        theta = random.uniform(0, 2 * math.pi)
-        phi = random.uniform(0, math.pi)
-        r = 0.8 + random.gauss(0, 0.15)
-        cx = r * math.sin(phi) * math.cos(theta)
-        cy = r * math.sin(phi) * math.sin(theta)
-        cz = r * math.cos(phi)
-        size = 0.02 + random.uniform(0, 0.03)
-        verts = []
+
+    with open(model_path) as f:
+        data = json.load(f)
+    splats = data.get("splats", [])
+    if not splats:
+        raise ValueError("Model payload is empty and cannot be exported.")
+
+    lines = ["COFF\n"]
+    num_tris = len(splats)
+    lines.append(f"{num_tris * 3} {num_tris} 0\n")
+    for s in splats:
+        pos = s["position"]
+        scale = s.get("scale", [0.01, 0.01, 0.01])
+        size = sum(scale) / len(scale) * 2
         for k in range(3):
             angle = k * 2 * math.pi / 3
-            verts.append([cx + size * math.cos(angle), cy + size * math.sin(angle), cz + random.gauss(0, 0.005)])
-        triangles.append({
-            "vertices": verts,
-            "color": [int(128 + 127 * math.sin(theta)), int(128 + 127 * math.cos(phi)), int(128 + 127 * math.sin(theta + phi))],
-            "opacity": random.uniform(0.6, 1.0),
-        })
-    return triangles
+            vx = pos[0] + size * math.cos(angle)
+            vy = pos[1] + size * math.sin(angle)
+            vz = pos[2]
+            lines.append(f"{vx} {vy} {vz}\n")
+    for i, s in enumerate(splats):
+        c = s.get("color", [128, 128, 128])
+        a = int(s.get("opacity", 0.8) * 255)
+        base = i * 3
+        lines.append(f"3 {base} {base+1} {base+2} {c[0]} {c[1]} {c[2]} {a}\n")
+    return "".join(lines)
 
 def convert_splats_to_triangles(splats):
     """Convert splat dicts to triangle dicts for mesh preview."""

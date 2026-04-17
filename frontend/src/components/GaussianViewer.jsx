@@ -9,6 +9,16 @@ import {
 import { Button } from "@/components/ui/button";
 
 export default function GaussianViewer({ modelData, modelNotReady = false, isProcessing, processingStatus }) {
+export default function GaussianViewer({ modelData, isProcessing, processingStatus, isDemo = false }) {
+const MODEL_FETCH_STATES = {
+  IDLE: "idle",
+  PROCESSING: "processing",
+  NOT_READY: "not_ready",
+  READY: "ready",
+  ERROR: "error",
+};
+
+export default function GaussianViewer({ modelData, isProcessing, processingStatus, modelFetchState = MODEL_FETCH_STATES.IDLE }) {
   const canvasRef = useRef(null);
   const [rotation, setRotation] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
@@ -297,6 +307,12 @@ export default function GaussianViewer({ modelData, modelNotReady = false, isPro
 
   return (
     <div className="viewer-canvas-container" data-testid="webgpu-viewer-canvas">
+      {isDemo && (
+        <div className="absolute left-4 right-4 top-4 z-20 rounded-lg border border-amber-500/60 bg-amber-950/85 px-4 py-2 text-sm text-amber-100 shadow-lg backdrop-blur-sm">
+          Preview data shown. Start processing to generate your real model.
+        </div>
+      )}
+
       <canvas
         ref={canvasRef}
         className="viewer-canvas cursor-grab active:cursor-grabbing"
@@ -311,6 +327,7 @@ export default function GaussianViewer({ modelData, modelNotReady = false, isPro
       {isProcessing && (
         <div className="processing-overlay">
           <div className="processing-spinner mb-4" />
+          <p className="text-base text-[var(--on-surface)] mb-1">Processing in Progress</p>
           <p className="text-sm text-[var(--on-surface)] mb-2">
             {processingStatus?.current_step || "Processing..."}
           </p>
@@ -320,8 +337,8 @@ export default function GaussianViewer({ modelData, modelNotReady = false, isPro
         </div>
       )}
 
-      {/* Empty State */}
-      {!modelData && !isProcessing && (
+      {/* Model State */}
+      {!modelData && !isProcessing && modelFetchState !== MODEL_FETCH_STATES.READY && (
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
           <Box className="w-16 h-16 text-[var(--surface-variant)] mb-4" />
           <p className="text-lg font-medium text-[var(--on-surface)] mb-2">
@@ -329,7 +346,21 @@ export default function GaussianViewer({ modelData, modelNotReady = false, isPro
           </p>
           <p className="text-sm text-[var(--outline)]">
             {modelNotReady ? "Upload images and run training to generate a model." : "Upload images and start processing"}
+            {modelFetchState === MODEL_FETCH_STATES.PROCESSING ? "Processing in Progress" : "No Model Yet"}
           </p>
+          <p className="text-sm text-[var(--outline)]">
+            {modelFetchState === MODEL_FETCH_STATES.PROCESSING
+              ? "Please wait while your reconstruction completes"
+              : modelFetchState === MODEL_FETCH_STATES.ERROR
+                ? "Unable to load model data"
+                : "Upload images and start processing"}
+          </p>
+        </div>
+      )}
+
+      {modelData && modelFetchState === MODEL_FETCH_STATES.READY && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 glass-panel px-3 py-1.5 rounded-lg pointer-events-none">
+          <p className="text-xs text-[var(--copper-base)]">Model Ready</p>
         </div>
       )}
 
