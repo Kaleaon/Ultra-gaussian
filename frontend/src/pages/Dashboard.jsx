@@ -27,6 +27,7 @@ export default function Dashboard() {
   const [images, setImages] = useState([]);
   const [processingStatus, setProcessingStatus] = useState(null);
   const [modelData, setModelData] = useState(null);
+  const [modelNotReady, setModelNotReady] = useState(false);
   const [meshData, setMeshData] = useState(null);
   const [meshReady, setMeshReady] = useState(false);
   const [deviceCapabilities, setDeviceCapabilities] = useState(null);
@@ -239,6 +240,7 @@ export default function Dashboard() {
       // Start processing
       await axios.post(`${API}/projects/${project.id}/process`);
       setProcessingStatus({ status: "queued", progress: 0, current_step: "Initializing..." });
+      setModelNotReady(false);
       setModelData(null);
       setModelFetchState(MODEL_FETCH_STATES.PROCESSING);
       toast.success("Processing started!");
@@ -256,6 +258,8 @@ export default function Dashboard() {
 
     try {
       const response = await axios.get(`${API}/projects/${id}/model`);
+      setModelData(response.data);
+      setModelNotReady(false);
       if (response.data?.data?.length > 0) {
         setModelData(response.data);
         setModelFetchState(MODEL_FETCH_STATES.READY);
@@ -264,6 +268,13 @@ export default function Dashboard() {
         setModelFetchState(MODEL_FETCH_STATES.NOT_READY);
       }
     } catch (error) {
+      if (error.response?.status === 404) {
+        setModelData(null);
+        setModelNotReady(true);
+        return;
+      }
+      setModelData(null);
+      setModelNotReady(false);
       console.error("Error fetching model:", error);
       if (error.response?.status === 404 || error.response?.status === 409) {
         setModelData(null);
@@ -349,6 +360,7 @@ export default function Dashboard() {
       setProcessingStatus(null);
       setModelData(null);
       setMeshData(null);
+      setModelNotReady(false);
       setMeshReady(false);
       setModelFetchState(MODEL_FETCH_STATES.IDLE);
       toast.success("New project created");
@@ -493,6 +505,7 @@ export default function Dashboard() {
           ) : (
             <GaussianViewer
               modelData={modelData}
+              modelNotReady={modelNotReady}
               isProcessing={isProcessing}
               processingStatus={processingStatus}
               isDemo={isDemoModel}
@@ -515,22 +528,6 @@ export default function Dashboard() {
             )}
           </div>
 
-          {/* Load Demo Preview */}
-          {!isProcessing && !modelData && !meshData && project && (
-            <button
-              className="absolute bottom-16 left-1/2 -translate-x-1/2 px-4 py-2 bg-[var(--surface)]/80 backdrop-blur-sm border border-[var(--surface-variant)] rounded-lg text-xs text-[var(--copper-base)] hover:bg-[var(--surface)] transition-colors"
-              onClick={() => {
-                if (settings.renderer === "triangle") {
-                  fetchMeshData(project.id);
-                } else {
-                  fetchModelData(project.id);
-                }
-              }}
-              data-testid="load-preview-btn"
-            >
-              Load Demo Preview
-            </button>
-          )}
         </div>
 
         {/* Right Panel - Settings & Export */}
