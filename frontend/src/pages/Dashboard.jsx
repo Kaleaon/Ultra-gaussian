@@ -223,7 +223,18 @@ export default function Dashboard() {
   };
 
   const handleRemoveImage = async (imageId) => {
-    setImages((prev) => prev.filter((img) => img.id !== imageId));
+    if (!project) return;
+
+    try {
+      await axios.delete(`${API}/images/${imageId}`);
+      setImages((prev) => prev.filter((img) => img.id !== imageId));
+
+      const projectResponse = await axios.get(`${API}/projects/${project.id}`);
+      setProject(projectResponse.data);
+    } catch (error) {
+      console.error("Error deleting image:", error);
+      toast.error(error.response?.data?.detail || "Failed to delete image");
+    }
   };
 
   const handleStartProcessing = async () => {
